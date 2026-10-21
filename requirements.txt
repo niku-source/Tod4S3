@@ -1,0 +1,9 @@
+aiohttp>=3.10,<4
+requests>=2.31,<3
+python-dotenv>=1.0,<2
+python-telegram-bot>=22,<23
+telethon>=1.45,<2
+cryptg>=0.4,<1
+yt-dlp>=2025.6.30,<2027
+yt-dlp-ejs>=0.8,<1
+cryptography>=42,<52

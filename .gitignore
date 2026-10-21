@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.part
+# Estado local del bot: puede contener IDs, historial, enlaces y sesiones.
+/data/
+/telegram_auth/
+/user_plans.json
+/daily_usage.json
+/task_history.json
+/users.json
+/admin_audit.json
+*.session
+*.session-journal
+*.enc

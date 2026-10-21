@@ -1,0 +1,20 @@
+services:
+  telegram-jk-bot:
+    build: .
+    container_name: telegram-jk-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TMPDIR: /tmp
+    init: true
+    read_only: true
+    volumes:
+      - bot-tmp:/tmp
+      - bot-data:/data
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  bot-tmp:
+  bot-data:
