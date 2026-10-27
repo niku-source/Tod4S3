@@ -2826,6 +2826,23 @@ async def edit_welcome_message(message, user_id: int, user_name: str, username: 
     )
 
 
+async def send_service_info_message(message, user_id: int, user_name: str,
+                                    username: str | None) -> None:
+    """Muestra la ficha sobre la imagen, sin volver a una pantalla textual aislada."""
+    caption = welcome_text(user_id, user_name, username)
+    markup = main_keyboard(user_id)
+    if WELCOME_IMAGE_PATH.is_file() and hasattr(message, "reply_photo"):
+        with WELCOME_IMAGE_PATH.open("rb") as photo:
+            await message.reply_photo(photo=photo, caption=caption, reply_markup=markup)
+        if hasattr(message, "delete"):
+            try:
+                await message.delete()
+            except Exception:
+                pass
+        return
+    await message.edit_text(caption, reply_markup=markup)
+
+
 def membership_keyboard(
     channel_label: str = "Canal oficial",
     group_label: str = "Soporte",
@@ -3206,26 +3223,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if query.data == "my_info":
-        await query.message.edit_text(
-            welcome_text(
-                user.id,
-                getattr(user, "full_name", "") or getattr(user, "first_name", ""),
-                getattr(user, "username", None),
-            ),
-            reply_markup=main_keyboard(user.id),
+        await send_service_info_message(
+            query.message,
+            user.id,
+            getattr(user, "full_name", "") or getattr(user, "first_name", ""),
+            getattr(user, "username", None),
         )
         return
 
     if query.data == "service_info":
-        await query.message.edit_text(
-            welcome_text(
-                user.id,
-                getattr(user, "full_name", "") or getattr(user, "first_name", ""),
-                getattr(user, "username", None),
-            ),
-            reply_markup=InlineKeyboardMarkup([
-                [btn("🖼️ VOLVER A LA IMAGEN", callback_data="home")],
-            ]),
+        await send_service_info_message(
+            query.message,
+            user.id,
+            getattr(user, "full_name", "") or getattr(user, "first_name", ""),
+            getattr(user, "username", None),
         )
         return
 
