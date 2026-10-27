@@ -2497,18 +2497,41 @@ def _todus_file_type(filename: str):
 
 def deliver_part_via_todus(part_path: Path, part_name: str, part_size: int,
                            target_number: str) -> str:
-    """Sube una parte con la cuenta del bot y la manda al chat ToDus del usuario."""
+    """Sube el archivo real con ToDus y lo manda al chat del usuario.
+
+    ``ToDusClient2.upload_file`` recibe bytes, no una ruta. Para no cargar
+    partes grandes completas en memoria, reservamos la subida y enviamos el
+    archivo mediante PUT en streaming.
+    """
     client = get_todus_client()
-    try:
-        url = client.upload_file(str(part_path))
-    except Exception:
-        client = get_todus_client(force_relogin=True)
-        url = client.upload_file(str(part_path))
-    client.send_file_message(
-        target_number, url, _todus_file_type(part_name),
-        caption=part_name, file_name=part_name, file_size=part_size,
-    )
-    return url
+    file_type = _todus_file_type(part_name)
+    last_error = None
+    for attempt in range(2):
+        try:
+            upload_url, download_url = client.reserve_upload_url(
+                part_size, file_type, file_name=part_name,
+            )
+            with part_path.open("rb") as handle:
+                response = client.session.put(
+                    upload_url,
+                    data=handle,
+                    headers={
+                        "Content-Type": "application/octet-stream",
+                        "Content-Length": str(part_size),
+                    },
+                    timeout=3600,
+                )
+                response.raise_for_status()
+            client.send_file_message(
+                target_number, download_url, file_type,
+                caption=part_name, file_name=part_name, file_size=part_size,
+            )
+            return download_url
+        except Exception as exc:
+            last_error = exc
+            if attempt == 0:
+                client = get_todus_client(force_relogin=True)
+    raise RuntimeError(f"No se pudo enviar el archivo por ToDus: {type(last_error).__name__}") from last_error
 
 
 if DELIVERY_MODE == "todus" and not (TODUS_BOT_PHONE and TODUS_BOT_PASSWORD):
