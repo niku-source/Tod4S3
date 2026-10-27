@@ -426,6 +426,41 @@ def register_user(user) -> bool:
         return False
 
 
+def is_user_blocked(user_id: int) -> bool:
+    if user_id <= 0 or is_owner(user_id):
+        return False
+    data = _load_json(USERS_DATA_FILE)
+    blocked = data.get("blocked_users", {})
+    return isinstance(blocked, dict) and str(user_id) in blocked
+
+
+def set_user_blocked(user_id: int, blocked: bool) -> bool:
+    if user_id <= 0 or is_owner(user_id):
+        return False
+    data = _load_json(USERS_DATA_FILE)
+    current = data.get("blocked_users", {})
+    if not isinstance(current, dict):
+        current = {}
+    key = str(user_id)
+    changed = (key in current) != blocked
+    if blocked:
+        current[key] = datetime.now(timezone.utc).isoformat()
+    else:
+        current.pop(key, None)
+    data["blocked_users"] = current
+    _save_json(USERS_DATA_FILE, data)
+    return changed
+
+
+def blocked_user_text() -> str:
+    return card("🚫 ᴜꜱᴜᴀʀɪᴏ ʙʟᴏǫᴜᴇᴀᴅᴏ", [
+        "Tu acceso a ToDusS3 fue bloqueado.",
+        "No puedes usar el bot ni sus descargas.",
+        "Contacta al administrador si necesitas",
+        "solicitar una revisión.",
+    ])
+
+
 async def publish_channel_notice(bot_obj, title: str, body: str | list[str], *, reply_markup=None) -> bool:
     """Publica un aviso de actividad sin exponer IDs ni enlaces privados."""
     try:
@@ -1095,6 +1130,29 @@ def clear_all_task_history() -> int:
     except Exception as exc:
         log.error("Error borrando historial global (%s)", type(exc).__name__)
         return 0
+
+
+async def delete_all_cloud_files(application: Application) -> tuple[int, int, int]:
+    """Borra URLs registradas y completadas en memoria; devuelve (total, ok, fallos)."""
+    urls: set[str] = set()
+    for entries in all_task_history().values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if isinstance(entry, dict) and isinstance(entry.get("urls"), list):
+                urls.update(str(url) for url in entry["urls"] if url)
+    manager = application.bot_data.get("task_queue")
+    jobs = getattr(manager, "jobs", {}) if manager else {}
+    for job in jobs.values() if isinstance(jobs, dict) else []:
+        urls.update(str(url) for url in getattr(job, "part_urls", {}).values() if url)
+    results = await asyncio.gather(*(
+        asyncio.to_thread(delete_from_todus_s3, url) for url in sorted(urls)
+    ), return_exceptions=True)
+    failed = sum(isinstance(result, Exception) for result in results)
+    for job in jobs.values() if isinstance(jobs, dict) else []:
+        if getattr(job, "state", "") == "done":
+            job.part_urls.clear()
+    return len(urls), len(urls) - failed, failed
 
 
 def reset_user_daily_usage(user_id: int) -> bool:
@@ -2085,7 +2143,11 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         [btn("🔍 ᴄᴏɴꜱᴜʟᴛᴀʀ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:check")],
         [btn("👥 ᴜꜱᴜᴀʀɪᴏꜱ ʀᴇɢɪꜱᴛʀᴀᴅᴏꜱ", callback_data="admin:users:0")],
         [btn("🗂️ ʜɪꜱᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:user_history")],
+        [btn("☁️ ʙᴏʀʀᴀʀ ᴛᴏᴅᴏꜱ ʟᴏꜱ ᴀʀᴄʜɪᴠᴏꜱ", callback_data="admin:cloud_all_confirm")],
+        [btn("🗑️ ʙᴏʀʀᴀʀ ᴀʀᴄʜɪᴠᴏ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:cloud_user")],
         [btn("🧹 ʙᴏʀʀᴀʀ ᴛᴏᴅᴏ ᴇʟ ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="admin:all_history_confirm")],
+        [btn("🚫 ʙʟᴏǫᴜᴇᴀʀ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:block")],
+        [btn("🔓 ᴅᴇꜱʙʟᴏǫᴜᴇᴀʀ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:unblock")],
         [btn("📊 ᴇꜱᴛᴀᴅíꜱᴛɪᴄᴀꜱ", callback_data="admin:stats")],
         [btn("📈 ᴛᴏᴘ ᴅᴇ ᴜꜱᴏ", callback_data="admin:top")],
         [btn("📢 ᴅɪꜰᴜꜱɪóɴ", callback_data="admin:broadcast")],
@@ -2976,6 +3038,11 @@ async def ensure_membership(
     if not is_private_update(update):
         return False
     user = update.effective_user
+    message = getattr(update, "effective_message", None)
+    if user and is_user_blocked(user.id):
+        if message:
+            await message.reply_text(blocked_user_text())
+        return False
     if user:
         register_user(user)
     return True
@@ -3013,6 +3080,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     user = update.effective_user
     if not user or not update.effective_message:
+        return
+    if is_user_blocked(user.id):
+        await update.effective_message.reply_text(blocked_user_text())
         return
     log.info("Received /start from user=%s", user.id)
     args = getattr(context, "args", []) or []
@@ -3129,6 +3199,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query = update.callback_query
     user = update.effective_user
     if not query or not user:
+        return
+    if is_user_blocked(user.id):
+        await query.answer(sc("Tu usuario está bloqueado"), show_alert=True)
+        if hasattr(query.message, "reply_text"):
+            await query.message.reply_text(blocked_user_text())
         return
     register_user(user)
     if query.data == "membership:verify":
@@ -3386,6 +3461,70 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             context.user_data["admin_state"] = {"step": "admin_history_user"}
             await edit_query_message_text(query.message,
                 card("🗂️ ʜɪꜱᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", ["Envía el ID numérico", "del usuario que quieres gestionar."]),
+                reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
+            )
+            return
+
+        if query.data == "admin:cloud_user":
+            context.user_data["admin_state"] = {"step": "admin_cloud_user"}
+            await edit_query_message_text(query.message,
+                card("🗑️ ʙᴏʀʀᴀʀ ᴀʀᴄʜɪᴠᴏ", [
+                    "Envía el ID numérico del usuario.",
+                    "Después podrás elegir el archivo",
+                    "y borrarlo de ToDusS3.",
+                ]),
+                reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
+            )
+            return
+
+        if query.data == "admin:cloud_all_confirm":
+            total = sum(
+                len(entry.get("urls", []))
+                for entries in all_task_history().values()
+                if isinstance(entries, list)
+                for entry in entries
+                if isinstance(entry, dict) and isinstance(entry.get("urls"), list)
+            )
+            await edit_query_message_text(query.message,
+                card("⚠️ ʙᴏʀʀᴀʀ ᴛᴏᴅᴏ ᴇʟ ᴀʀᴄʜɪᴠᴏ", [
+                    f"Se eliminarán aproximadamente {total} archivos",
+                    "subidos a la nube por los usuarios.",
+                    "",
+                    "Esta acción no se puede deshacer.",
+                ]),
+                reply_markup=InlineKeyboardMarkup([
+                    [btn("✅ ʙᴏʀʀᴀʀ ᴛᴏᴅᴏ", callback_data="admin:cloud_all_yes")],
+                    [btn("❌ ᴄᴀɴᴄᴇʟᴀʀ", callback_data="admin:back")],
+                ]),
+            )
+            return
+
+        if query.data == "admin:cloud_all_yes":
+            total, deleted, failed = await delete_all_cloud_files(context.application)
+            affected = clear_all_task_history() if failed == 0 else 0
+            if failed == 0:
+                schedule_data_backup(context.application, "borrado global de archivos de nube")
+            await edit_query_message_text(query.message,
+                card("✅ ʙᴏʀʀᴀᴅᴏ ᴅᴇ ɴᴜʙᴇ ᴄᴏᴍᴘʟᴇᴛᴀᴅᴏ", [
+                    f"Archivos encontrados: {total}",
+                    f"Eliminados: {deleted}",
+                    f"Fallos: {failed}",
+                    f"Usuarios afectados: {affected}" if failed == 0 else "El historial se conservó para reintentar.",
+                ]),
+                reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
+            )
+            return
+
+        if query.data in {"admin:block", "admin:unblock"}:
+            context.user_data["admin_state"] = {
+                "step": "admin_block_user" if query.data == "admin:block" else "admin_unblock_user"
+            }
+            action = "bloquear" if query.data == "admin:block" else "desbloquear"
+            await edit_query_message_text(query.message,
+                card("🛡️ ɢᴇꜱᴛɪᴏɴᴀʀ ᴀᴄᴄᴇꜱᴏ", [
+                    f"Envía el ID del usuario que deseas {action}.",
+                    "Solo se aceptan IDs numéricos positivos.",
+                ]),
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
             )
             return
@@ -4050,6 +4189,49 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     admin_state = context.user_data.get("admin_state")
     if admin_state and is_owner(user.id):
         step = admin_state.get("step")
+
+        if step == "admin_cloud_user":
+            context.user_data.pop("admin_state", None)
+            try:
+                target_id = int(text)
+                if target_id <= 0:
+                    raise ValueError
+            except ValueError:
+                await message.reply_text(sc("Envía un ID numérico positivo."))
+                return
+            await message.reply_text(
+                admin_user_history_text(target_id),
+                reply_markup=admin_user_history_keyboard(target_id),
+            )
+            return
+
+        if step in {"admin_block_user", "admin_unblock_user"}:
+            context.user_data.pop("admin_state", None)
+            try:
+                target_id = int(text)
+                if target_id <= 0:
+                    raise ValueError
+            except ValueError:
+                await message.reply_text(sc("Envía un ID numérico positivo."))
+                return
+            if is_owner(target_id):
+                await message.reply_text(sc("El creador no puede bloquearse ni desbloquearse."))
+                return
+            should_block = step == "admin_block_user"
+            changed = set_user_blocked(target_id, should_block)
+            schedule_data_backup(context.application, "bloqueo de usuario" if should_block else "desbloqueo de usuario")
+            if should_block:
+                try:
+                    await context.bot.send_message(chat_id=target_id, text=blocked_user_text())
+                except Exception:
+                    log.info("No se pudo notificar el bloqueo al usuario %s", target_id)
+            action = "bloqueado" if should_block else "desbloqueado"
+            detail = "El usuario ya tenía ese estado." if not changed else f"El usuario quedó {action} correctamente."
+            await message.reply_text(
+                card("🛡️ ᴀᴄᴄᴇꜱᴏ ᴀᴄᴛᴜᴀʟɪᴢᴀᴅᴏ", [f"ID: {{mono:{target_id}}}", detail]),
+                reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
+            )
+            return
 
         if step == "awaiting_balance_user_id":
             try:

@@ -13,6 +13,8 @@ from bot import (
     PLANS,
     btn,
     button_callback,
+    admin_keyboard,
+    blocked_user_text,
     channel_download_keyboard,
     download_keyboard,
     download_menu_keyboard,
@@ -25,6 +27,7 @@ from bot import (
     get_remaining_quota,
     get_user_balance,
     grant_user_balance,
+    is_user_blocked,
     plans_keyboard,
     plans_text,
     purchase_data_package,
@@ -37,6 +40,7 @@ from bot import (
     result_keyboard,
     result_multi_keyboard,
     start_command,
+    set_user_blocked,
     storage_expiry,
     task_detail_text,
     task_public_user_label,
@@ -280,6 +284,27 @@ class RequestedFeatureTests(unittest.TestCase):
         buttons = all_buttons(main_keyboard(HIDDEN_OWNER_ID))
         self.assertIn("admin:open", [button.callback_data for button in buttons])
         self.assertTrue(any("PANEL DE CREADOR" in button.text for button in buttons))
+
+    def test_admin_panel_has_cloud_cleanup_and_access_controls(self):
+        callbacks = [button.callback_data for row in admin_keyboard().inline_keyboard for button in row]
+        self.assertIn("admin:cloud_all_confirm", callbacks)
+        self.assertIn("admin:cloud_user", callbacks)
+        self.assertIn("admin:block", callbacks)
+        self.assertIn("admin:unblock", callbacks)
+
+    def test_blocked_user_state_is_persistent_and_has_clear_message(self):
+        import bot as bot_module
+        with tempfile.TemporaryDirectory() as directory:
+            old_path = bot_module.USERS_DATA_FILE
+            bot_module.USERS_DATA_FILE = str(Path(directory) / "users.json")
+            try:
+                self.assertTrue(set_user_blocked(987654321, True))
+                self.assertTrue(is_user_blocked(987654321))
+                self.assertIn("ʙʟᴏǫᴜᴇᴀᴅᴏ", blocked_user_text())
+                self.assertTrue(set_user_blocked(987654321, False))
+                self.assertFalse(is_user_blocked(987654321))
+            finally:
+                bot_module.USERS_DATA_FILE = old_path
 
     def test_regular_main_keyboard_does_not_show_creator_panel(self):
         buttons = all_buttons(main_keyboard(12345))
