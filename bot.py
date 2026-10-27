@@ -9,6 +9,7 @@ import mimetypes
 import os
 import re
 import socket
+import threading
 import tempfile
 import textwrap
 import time
@@ -104,6 +105,7 @@ except ValueError:
 # Modo de entrega del archivo descargado:
 #   "cloud" = subir a ToDus S3 y dar enlaces (comportamiento original)
 #   "chat"  = enviar el archivo directamente al chat privado del usuario
+DELIVERY_MODE = os.getenv("DELIVERY_MODE", "chat").strip().lower() or "chat"
 DELIVERY_MODE = os.getenv("DELIVERY_MODE", "chat").strip().lower() or "chat"
 # Límite de Bot API para enviar documentos: 50 MiB.
 BOT_API_SEND_LIMIT = 50 * MIB
@@ -2409,6 +2411,96 @@ async def send_document_to_chat(job: TransferTask, bot_obj, part_path: Path,
     raise RuntimeError(f"No se pudo enviar la parte {index + 1}/{total}: {type(last_error).__name__}")
 
 
+# ═══════════════════════════════════════════════════════════════
+#  ENTREGA POR TODUS (cuenta del bot → chat ToDus del usuario)
+# ═══════════════════════════════════════════════════════════════
+TODUS_USERS_FILE = os.getenv("TODUS_USERS_FILE", str(DATA_DIR / "todus_users.json"))
+TODUS_BOT_PHONE = os.getenv("TODUS_PHONE", "").strip()
+TODUS_BOT_PASSWORD = os.getenv("TODUS_PASSWORD", "").strip()
+_todus_client = None
+_todus_client_lock = threading.Lock()
+
+
+def _normalize_todus_number(value: str) -> str:
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    if len(digits) == 8:
+        digits = "53" + digits
+    return digits
+
+
+def get_user_todus_number(user_id: int) -> str:
+    try:
+        data = _load_json(TODUS_USERS_FILE)
+        entry = data.get(str(user_id))
+        if isinstance(entry, dict):
+            return str(entry.get("number") or "")
+        if isinstance(entry, str):
+            return entry
+    except Exception:
+        log.error("Error leyendo número ToDus de %s", user_id, exc_info=True)
+    return ""
+
+
+def set_user_todus_number(user_id: int, number: str) -> None:
+    try:
+        data = _load_json(TODUS_USERS_FILE)
+        data[str(user_id)] = {
+            "number": number,
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _save_json(TODUS_USERS_FILE, data)
+    except Exception:
+        log.error("Error guardando número ToDus de %s", user_id, exc_info=True)
+
+
+def get_todus_client(force_relogin: bool = False):
+    """Cliente ToDus del bot, autenticado; re-login automático si caduca."""
+    global _todus_client
+    with _todus_client_lock:
+        from todus import ToDusClient2
+        if _todus_client is None:
+            if not (TODUS_BOT_PHONE and TODUS_BOT_PASSWORD):
+                raise RuntimeError("Falta configurar TODUS_PHONE y TODUS_PASSWORD.")
+            _todus_client = ToDusClient2(TODUS_BOT_PHONE, TODUS_BOT_PASSWORD)
+            _todus_client.login()
+        elif force_relogin:
+            _todus_client.login()
+    return _todus_client
+
+
+def _todus_file_type(filename: str):
+    from todus.types import FileType
+    ext = Path(filename).suffix.lower()
+    if ext in {".mp4", ".mkv", ".avi", ".mov", ".webm"}:
+        return FileType.VIDEO
+    if ext in {".mp3", ".m4a", ".wav", ".ogg", ".opus", ".flac"}:
+        return FileType.AUDIO
+    if ext in {".jpg", ".jpeg", ".png", ".gif", ".webp"}:
+        return FileType.PICTURE
+    return FileType.FILE
+
+
+def deliver_part_via_todus(part_path: Path, part_name: str, part_size: int,
+                           target_number: str) -> str:
+    """Sube una parte con la cuenta del bot y la manda al chat ToDus del usuario."""
+    client = get_todus_client()
+    try:
+        url = client.upload_file(str(part_path))
+    except Exception:
+        client = get_todus_client(force_relogin=True)
+        url = client.upload_file(str(part_path))
+    client.send_file_message(
+        target_number, url, _todus_file_type(part_name),
+        caption=part_name, file_name=part_name, file_size=part_size,
+    )
+    return url
+
+
+if DELIVERY_MODE == "todus" and not (TODUS_BOT_PHONE and TODUS_BOT_PASSWORD):
+    log.warning("DELIVERY_MODE=todus sin TODUS_PHONE/TODUS_PASSWORD; uso 'chat'.")
+    DELIVERY_MODE = "chat"
+
+
 async def send_task_links(job: TransferTask, bot_obj, chat_id: int | None = None) -> None:
     target_chat = chat_id or job.chat_id
     urls = sorted(job.part_urls.items())
@@ -2645,6 +2737,9 @@ async def process_task(job: TransferTask, application: Application) -> None:
         if DELIVERY_MODE == "chat" and not application.bot_data.get("local_bot_api", False):
             # Sin un servidor local de Bot API, el límite de documentos es 50 MiB.
             part_size = min(part_size, BOT_API_SEND_LIMIT - 2 * MIB)
+        if DELIVERY_MODE == "todus":
+            # Límite conservador de la app ToDus por archivo.
+            part_size = min(part_size, 950 * MIB)
         if not job.part_paths or any(not Path(p).exists() for p in job.part_paths):
             part_dir = Path(os.getenv("TMPDIR", "/tmp")) / f"jk-task-{job.task_id}"
             parts = await asyncio.to_thread(split_into_parts, temp_path, filename, part_dir, part_size)
@@ -2681,6 +2776,26 @@ async def process_task(job: TransferTask, application: Application) -> None:
                     index, len(job.part_paths),
                 )
                 job.part_urls[index] = ""
+            elif DELIVERY_MODE == "todus":
+                target_number = get_user_todus_number(job.user_id)
+                if not target_number:
+                    raise ValueError(
+                        "Falta tu número de ToDus. Envía /todus <tu número> "
+                        "y vuelve a crear la tarea."
+                    )
+                try:
+                    await job.status_message.edit_text(card("📤 ꜱᴜʙɪᴇɴᴅᴏ ᴀ ᴛᴏᴅᴜꜱ", [
+                        part_name[:24],
+                        f"Parte {index + 1}/{len(job.part_paths)}",
+                        f"📱 {target_number}",
+                    ]))
+                except Exception:
+                    pass
+                link = await asyncio.to_thread(
+                    deliver_part_via_todus, part_path, part_name,
+                    part_total, target_number,
+                )
+                job.part_urls[index] = link
             else:
                 link, _ = await upload_to_todus_s3_with_progress(
                     job.status_message, part_path, part_name, job.user_id,
@@ -2737,6 +2852,17 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 "",
                 "Si fueron varias partes, une con HJSplit",
                 "o el programa que prefieras.",
+            ]))
+        elif DELIVERY_MODE == "todus":
+            await job.status_message.edit_text(card("✅ ᴀʀᴄʜɪᴠᴏ ʟɪꜱᴛᴏ", [
+                "Ya está en tu ToDus 📲",
+                "",
+                f"📄 {(filename or 'archivo')[:42]}",
+                f"📦 Tamaño: {_size_label(size)}",
+                f"📱 Número: {get_user_todus_number(job.user_id)}",
+                "",
+                "Ábrelo en ToDus y púlsalo",
+                "para descargarlo (tráfico nacional).",
             ]))
         else:
             await job.status_message.edit_text(
@@ -3201,6 +3327,49 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         membership_prompt_text(),
         reply_markup=membership_keyboard(),
     )
+
+
+async def todus_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Registra o consulta el número de ToDus del usuario."""
+    if not is_private_update(update):
+        return
+    user = update.effective_user
+    if not user or not update.effective_message:
+        return
+    if not await ensure_membership(update, context):
+        return
+    args = (context.args or []) if context else []
+    if not args:
+        current = get_user_todus_number(user.id)
+        if current:
+            await update.effective_message.reply_text(card("📱 ᴛᴜ ɴúᴍᴇʀᴏ ᴛᴏᴅᴜꜱ", [
+                f"Registrado: {{mono:{current}}}",
+                "",
+                "Para cambiarlo: /todus <número>",
+            ]))
+        else:
+            await update.effective_message.reply_text(card("📱 ɴúᴍᴇʀᴏ ᴛᴏᴅᴜꜱ", [
+                "Aún no tienes un número registrado.",
+                "",
+                "Envía: /todus 5XXXXXXXX",
+                "para recibir tus archivos en ToDus",
+                "con tráfico nacional.",
+            ]))
+        return
+    number = _normalize_todus_number(args[0])
+    if not re.fullmatch(r"53\d{8}", number):
+        await update.effective_message.reply_text(card("❌ ɴúᴍᴇʀᴏ ɪɴᴠáʟɪᴅᴏ", [
+            "Usa tu número cubano completo:",
+            "/todus 5XXXXXXXX",
+        ]))
+        return
+    set_user_todus_number(user.id, number)
+    await update.effective_message.reply_text(card("✅ ɴúᴍᴇʀᴏ ɢᴜᴀʀᴅᴀᴅᴏ", [
+        f"Número: {{mono:{number}}}",
+        "",
+        "Tus próximas descargas llegarán",
+        "a ese chat de ToDus.",
+    ]))
 
 
 async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -4835,6 +5004,7 @@ def main() -> None:
     application.add_handler(CommandHandler("historial", history_command))
     application.add_handler(CommandHandler("micuota", my_quota_command))
     application.add_handler(CommandHandler("id", id_command))
+    application.add_handler(CommandHandler("todus", todus_command))
     application.add_handler(CommandHandler("top", top_command))
     application.add_handler(CommandHandler("backup", backup_command))
     application.add_handler(CommandHandler("jkadmin", jkadmin_command))
