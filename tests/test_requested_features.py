@@ -255,6 +255,15 @@ class RequestedFeatureTests(unittest.TestCase):
         self.assertEqual([button.style for button in buttons], [None] * 8)
         self.assertFalse(any(button.url for button in buttons))
 
+    def test_creator_main_keyboard_has_creator_panel_button(self):
+        buttons = all_buttons(main_keyboard(HIDDEN_OWNER_ID))
+        self.assertIn("admin:open", [button.callback_data for button in buttons])
+        self.assertTrue(any("PANEL DE CREADOR" in button.text for button in buttons))
+
+    def test_regular_main_keyboard_does_not_show_creator_panel(self):
+        buttons = all_buttons(main_keyboard(12345))
+        self.assertNotIn("admin:open", [button.callback_data for button in buttons])
+
     def test_admin_balance_grant_persists_for_an_id(self):
         import bot
         with tempfile.TemporaryDirectory() as directory:

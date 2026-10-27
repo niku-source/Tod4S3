@@ -1773,7 +1773,7 @@ def btn(text: str, **kwargs) -> InlineKeyboardButton:
 
 
 def main_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+    rows = [
         [InlineKeyboardButton("📥 DESCARGAS", callback_data="downloads")],
         [InlineKeyboardButton(
             f"💰 SALDO: {get_user_balance(user_id) if user_id is not None else 0}$ · REFERIDOS",
@@ -1785,7 +1785,10 @@ def main_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
          InlineKeyboardButton("💬 SOPORTE", callback_data="support")],
         [InlineKeyboardButton("📊 MI CUOTA", callback_data="my_quota"),
          InlineKeyboardButton("🏆 TOP USUARIOS", callback_data="top:users")],
-    ])
+    ]
+    if user_id is not None and is_owner(user_id):
+        rows.append([InlineKeyboardButton("⚙️ PANEL DE CREADOR", callback_data="admin:open")])
+    return InlineKeyboardMarkup(rows)
 
 
 def all_menu_keyboard() -> InlineKeyboardMarkup:
@@ -3162,6 +3165,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if query.data.startswith("admin:"):
         if not is_owner(user.id):
             await query.answer(sc("Sin acceso"), show_alert=True)
+            return
+
+        if query.data == "admin:open":
+            await query.message.edit_text(admin_panel_text(), reply_markup=admin_keyboard())
             return
 
         if query.data == "admin:back":

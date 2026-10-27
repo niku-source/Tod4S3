@@ -27,6 +27,18 @@ class PlatformRecognitionTests(unittest.TestCase):
         self.assertTrue(is_supported_platform_url("https://vm.tiktok.com/abc123/"))
         self.assertTrue(is_supported_platform_url("https://www.instagram.com/reel/abc123/"))
 
+    def test_recognizes_all_advertised_platform_hosts(self):
+        urls = [
+            "https://www.tiktok.com/@user/video/123456789",
+            "https://twitter.com/user/status/123456789",
+            "https://x.com/user/status/123456789",
+            "https://www.reddit.com/r/test/comments/abc123/test/",
+            "https://www.twitch.tv/videos/123456789",
+        ]
+        for url in urls:
+            with self.subTest(url=url):
+                self.assertTrue(is_supported_platform_url(url))
+
     def test_does_not_route_direct_file_urls_through_extractor(self):
         self.assertFalse(is_supported_platform_url("https://files.example.org/movie.mp4"))
 
