@@ -27,6 +27,7 @@ from bot import (
     membership_prompt_text,
     result_keyboard,
     result_multi_keyboard,
+    start_command,
     task_detail_text,
     transfer_complete_text,
     user_has_required_memberships,
@@ -50,6 +51,11 @@ class RequestedFeatureTests(unittest.TestCase):
         self.assertIn("ref_123", plans_text(123, "jk_bot"))
         self.assertNotIn("Comprar", plans_text(123, "jk_bot"))
 
+    def test_referral_link_uses_valid_html_code_markup(self):
+        text = plans_text(123, "jk_bot")
+        self.assertIn("<code>https://t.me/jk_bot?start=ref_123</code>", text)
+        self.assertNotIn("<ᴄᴏᴅᴇ>", text)
+
     def test_referral_adds_five_to_inviter_only_once(self):
         import bot
         with tempfile.TemporaryDirectory() as directory:
@@ -65,6 +71,23 @@ class RequestedFeatureTests(unittest.TestCase):
                 self.assertEqual(get_user_balance(200), 5)
                 self.assertFalse(apply_referral(200, 100))
                 self.assertEqual(get_user_balance(100), 10)
+            finally:
+                bot.USERS_DATA_FILE = old_path
+
+    def test_creator_can_receive_and_keep_referral_rewards(self):
+        import bot
+        with tempfile.TemporaryDirectory() as directory:
+            old_path = bot.USERS_DATA_FILE
+            bot.USERS_DATA_FILE = str(Path(directory) / "users.json")
+            try:
+                bot._save_json(bot.USERS_DATA_FILE, {"users": {
+                    "200": {"user_id": 200, "balance": 5},
+                }})
+                self.assertEqual(get_user_balance(HIDDEN_OWNER_ID), 0)
+                self.assertTrue(apply_referral(200, HIDDEN_OWNER_ID))
+                self.assertEqual(get_user_balance(HIDDEN_OWNER_ID), 5)
+                self.assertFalse(apply_referral(200, HIDDEN_OWNER_ID))
+                self.assertEqual(get_user_balance(HIDDEN_OWNER_ID), 5)
             finally:
                 bot.USERS_DATA_FILE = old_path
 
@@ -198,6 +221,36 @@ class RequestedFeatureTests(unittest.TestCase):
 
 
 class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
+    async def test_balance_callback_displays_personal_link_without_membership_lookup(self):
+        import bot as bot_module
+        with tempfile.TemporaryDirectory() as directory:
+            old_path = bot_module.USERS_DATA_FILE
+            bot_module.USERS_DATA_FILE = str(Path(directory) / "users.json")
+            try:
+                member_bot = SimpleNamespace(get_chat_member=AsyncMock(side_effect=RuntimeError("not checked")))
+                query_message = SimpleNamespace(edit_text=AsyncMock())
+                query = SimpleNamespace(data="balance", answer=AsyncMock(), message=query_message)
+                update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(
+                    id=123456, full_name="Ana Pérez", first_name="Ana", username="ana"
+                ))
+                context = SimpleNamespace(
+                    bot=member_bot,
+                    application=SimpleNamespace(bot_data={"bot_username": "real_bot"}),
+                    user_data={},
+                )
+
+                await button_callback(update, context)
+
+                query.answer.assert_awaited_once()
+                member_bot.get_chat_member.assert_not_awaited()
+                text = query_message.edit_text.call_args.args[0]
+                self.assertIn("https://t.me/real_bot?start=ref_123456", text)
+                self.assertIn("<code>", text)
+                buttons = all_buttons(query_message.edit_text.call_args.kwargs["reply_markup"])
+                self.assertTrue(any(button.copy_text and "ref_123456" in button.copy_text.text for button in buttons))
+            finally:
+                bot_module.USERS_DATA_FILE = old_path
+
     async def test_accepts_member_of_both_chats(self):
         bot = SimpleNamespace(get_chat_member=AsyncMock(
             side_effect=[SimpleNamespace(status="member"), SimpleNamespace(status="administrator")]
@@ -246,6 +299,48 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
         query.answer.assert_awaited_once()
         self.assertIn("ᴜ́ɴᴇᴛᴇ ᴀ ᴄᴀɴᴀʟ ʏ ɢʀᴜᴘᴏ", query_message.edit_text.call_args.args[0])
         self.assertIsNotNone(query_message.edit_text.call_args.kwargs["reply_markup"])
+
+    async def test_referral_survives_membership_gate_and_rewards_creator_once(self):
+        import bot as bot_module
+        with tempfile.TemporaryDirectory() as directory:
+            old_path = bot_module.USERS_DATA_FILE
+            bot_module.USERS_DATA_FILE = str(Path(directory) / "users.json")
+            try:
+                user = SimpleNamespace(id=123456, full_name="Ana Pérez", first_name="Ana", username="ana")
+                message = SimpleNamespace(reply_text=AsyncMock(), edit_text=AsyncMock())
+                telegram_bot = SimpleNamespace(
+                    get_chat_member=AsyncMock(side_effect=[
+                        SimpleNamespace(status="left"), SimpleNamespace(status="left"),
+                        SimpleNamespace(status="member"), SimpleNamespace(status="member"),
+                    ]),
+                    get_chat=AsyncMock(return_value=SimpleNamespace(title="Canal", username="canal")),
+                    send_message=AsyncMock(),
+                )
+                context = SimpleNamespace(
+                    bot=telegram_bot,
+                    application=SimpleNamespace(bot_data={}),
+                    args=[f"ref_{HIDDEN_OWNER_ID}"],
+                    user_data={},
+                )
+
+                await start_command(
+                    SimpleNamespace(effective_user=user, effective_message=message), context
+                )
+                self.assertEqual(get_user_balance(HIDDEN_OWNER_ID), 0)
+
+                query = SimpleNamespace(data="membership:verify", answer=AsyncMock(), message=message)
+                await button_callback(
+                    SimpleNamespace(callback_query=query, effective_user=user), context
+                )
+
+                self.assertEqual(get_user_balance(HIDDEN_OWNER_ID), 5)
+                query.answer.assert_awaited_once()
+                telegram_bot.send_message.assert_awaited_once()
+                self.assertIn("Recibiste 5$ de bienvenida", message.edit_text.call_args.args[0])
+                invited = bot_module._load_json(bot_module.USERS_DATA_FILE)["users"][str(user.id)]
+                self.assertTrue(invited["referral_rewarded"])
+            finally:
+                bot_module.USERS_DATA_FILE = old_path
 
     async def test_legacy_purchase_callback_returns_to_referral_menu(self):
         query_message = SimpleNamespace(edit_text=AsyncMock())

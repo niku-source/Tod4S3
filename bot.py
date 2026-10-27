@@ -391,14 +391,13 @@ def register_user(user) -> None:
 
 def get_user_balance(user_id: int) -> int:
     """Devuelve el saldo virtual persistente del usuario, en pesos."""
-    if is_owner(user_id):
-        return 0
     users = _load_json(USERS_DATA_FILE).get("users", {})
     entry = users.get(str(user_id), {}) if isinstance(users, dict) else {}
+    default_balance = 0 if is_owner(user_id) else REFERRAL_START_BALANCE
     try:
-        return max(0, int(entry.get("balance", REFERRAL_START_BALANCE)))
+        return max(0, int(entry.get("balance", default_balance)))
     except (TypeError, ValueError):
-        return REFERRAL_START_BALANCE
+        return default_balance
 
 
 def grant_user_balance(user_id: int, amount: int) -> tuple[bool, int]:
@@ -413,7 +412,8 @@ def grant_user_balance(user_id: int, amount: int) -> tuple[bool, int]:
         entry = users.get(str(user_id), {})
         if not isinstance(entry, dict):
             entry = {}
-        current = max(0, int(entry.get("balance", REFERRAL_START_BALANCE)))
+        default_balance = 0 if is_owner(user_id) else REFERRAL_START_BALANCE
+        current = max(0, int(entry.get("balance", default_balance)))
         entry.update({"user_id": user_id, "balance": current + amount})
         entry["balance_granted_at"] = datetime.now(timezone.utc).isoformat()
         users[str(user_id)] = entry
@@ -440,22 +440,80 @@ def apply_referral(user_id: int, referrer_id: int) -> bool:
     try:
         data = _load_json(USERS_DATA_FILE)
         users = data.get("users", {})
-        if not isinstance(users, dict) or str(user_id) not in users or str(referrer_id) not in users:
+        if not isinstance(users, dict) or str(user_id) not in users:
             return False
         invited = users[str(user_id)]
+        if not isinstance(invited, dict):
+            return False
         if invited.get("referred_by") or invited.get("referral_rewarded"):
             return False
-        inviter = users[str(referrer_id)]
-        inviter["balance"] = max(0, int(inviter.get("balance", REFERRAL_START_BALANCE))) + REFERRAL_REWARD
+        inviter = users.get(str(referrer_id))
+        if not isinstance(inviter, dict):
+            if not is_owner(referrer_id):
+                return False
+            inviter = {"user_id": referrer_id, "balance": 0}
+            users[str(referrer_id)] = inviter
+        inviter_default = 0 if is_owner(referrer_id) else REFERRAL_START_BALANCE
+        inviter["balance"] = max(0, int(inviter.get("balance", inviter_default))) + REFERRAL_REWARD
         invited["referred_by"] = referrer_id
         invited["referral_rewarded"] = True
         invited["referral_reward"] = REFERRAL_START_BALANCE
+        invited.pop("pending_referrer_id", None)
         data["users"] = users
         _save_json(USERS_DATA_FILE, data)
         return True
     except (TypeError, ValueError, OSError) as exc:
         log.warning("No se pudo acreditar referido (%s).", type(exc).__name__)
         return False
+
+
+def remember_pending_referral(user_id: int, referrer_id: int) -> bool:
+    """Guarda la invitación hasta que el usuario complete el control de acceso."""
+    if user_id <= 0 or referrer_id <= 0 or user_id == referrer_id or is_owner(user_id):
+        return False
+    try:
+        data = _load_json(USERS_DATA_FILE)
+        users = data.get("users", {})
+        if not isinstance(users, dict):
+            users = {}
+        inviter = users.get(str(referrer_id))
+        if not isinstance(inviter, dict):
+            if not is_owner(referrer_id):
+                return False
+            users[str(referrer_id)] = {"user_id": referrer_id, "balance": 0}
+        invited = users.get(str(user_id))
+        if not isinstance(invited, dict):
+            invited = {
+                "user_id": user_id,
+                "balance": REFERRAL_START_BALANCE,
+                "welcome_reward": REFERRAL_START_BALANCE,
+            }
+            users[str(user_id)] = invited
+        if invited.get("referred_by") or invited.get("referral_rewarded"):
+            return False
+        existing = invited.get("pending_referrer_id")
+        if existing:
+            return int(existing) == referrer_id
+        invited["pending_referrer_id"] = referrer_id
+        data["users"] = users
+        _save_json(USERS_DATA_FILE, data)
+        return True
+    except (TypeError, ValueError, OSError) as exc:
+        log.warning("No se pudo guardar el referido pendiente (%s).", type(exc).__name__)
+        return False
+
+
+def apply_pending_referral(user_id: int) -> int | None:
+    """Acredita la invitación pendiente tras completar la verificación de acceso."""
+    users = _load_json(USERS_DATA_FILE).get("users", {})
+    invited = users.get(str(user_id), {}) if isinstance(users, dict) else {}
+    try:
+        referrer_id = int(invited.get("pending_referrer_id", 0))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if referrer_id > 0 and apply_referral(user_id, referrer_id):
+        return referrer_id
+    return None
 
 
 def registered_user_ids() -> list[int]:
@@ -1631,7 +1689,7 @@ def plans_text(user_id: int, bot_username: str | None = None) -> str:
         "tú recibes 5$ y ella recibe",
         "su bienvenida de 5$.",
         "",
-        f"🔗 Tu enlace copiable:\n<code>{link}</code>",
+        f"🔗 Tu enlace copiable:\n{{mono:{link}}}",
     ]
     return f"{card('👥 ʀᴇꜰᴇʀɪᴅᴏꜱ ʏ ꜱᴀʟᴅᴏ', lines)}\n\n{BOT_FOOTER}"
 
@@ -2626,6 +2684,26 @@ async def ensure_membership(
     return False
 
 
+async def complete_pending_referral(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Acredita un referido pendiente y notifica al invitador tras pasar el gate."""
+    referrer_id = apply_pending_referral(user_id)
+    if referrer_id is None:
+        return False
+    schedule_data_backup(context.application, "recompensa de referido")
+    try:
+        await context.bot.send_message(
+            chat_id=referrer_id,
+            text=card("🎉 ʀᴇꜰᴇʀɪᴅᴏ ᴄᴏɴꜰɪʀᴍᴀᴅᴏ", [
+                "Alguien entró con tu enlace.",
+                "🎊 ¡Felicidades! Recibiste 5$.",
+                f"💳 Saldo actual: {get_user_balance(referrer_id)}$",
+            ]),
+        )
+    except Exception:
+        log.info("No se pudo avisar al invitador %s", referrer_id)
+    return True
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_private_update(update):
         return
@@ -2633,28 +2711,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not user or not update.effective_message:
         return
     log.info("Received /start from user=%s", user.id)
+    args = getattr(context, "args", []) or []
+    if args:
+        match = re.fullmatch(r"ref_(\d{1,20})", str(args[0]).strip(), re.IGNORECASE)
+        if match:
+            remember_pending_referral(user.id, int(match.group(1)))
     if not await ensure_membership(update, context, allow_owner=False):
         return
     referral_notice = ""
-    args = getattr(context, "args", []) or []
-    if args:
-        match = re.fullmatch(r"ref_(\d+)", str(args[0]).strip(), re.IGNORECASE)
-        if match:
-            referrer_id = int(match.group(1))
-            if apply_referral(user.id, referrer_id):
-                referral_notice = "\n\n🎁 Recibiste 5$ de bienvenida por entrar con un enlace de invitación."
-                try:
-                    await context.bot.send_message(
-                        chat_id=referrer_id,
-                        text=card("🎉 ʀᴇꜰᴇʀɪᴅᴏ ᴄᴏɴꜰɪʀᴍᴀᴅᴏ", [
-                            "Alguien entró con tu enlace.",
-                            "🎊 ¡Felicidades! Recibiste 5$.",
-                            f"💳 Saldo actual: {get_user_balance(referrer_id)}$",
-                        ]),
-                    )
-                except Exception:
-                    log.info("No se pudo avisar al invitador %s", referrer_id)
-                schedule_data_backup(context.application, "recompensa de referido")
+    if await complete_pending_referral(user.id, context):
+        referral_notice = "\n\n🎁 Recibiste 5$ de bienvenida por entrar con un enlace de invitación."
     await update.effective_message.reply_text(
         welcome_text(
             user.id,
@@ -2761,12 +2827,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         else:
             is_member, check_failed, missing = await check_required_memberships_detailed(context.bot, user.id)
         if is_member:
+            referral_notice = ""
+            if await complete_pending_referral(user.id, context):
+                referral_notice = "\n\n🎁 Recibiste 5$ de bienvenida por entrar con un enlace de invitación."
             await query.message.edit_text(
                 welcome_text(
                     user.id,
                     getattr(user, "full_name", "") or getattr(user, "first_name", ""),
                     getattr(user, "username", None),
-                ),
+                ) + referral_notice,
                 reply_markup=main_keyboard(user.id),
             )
         else:
