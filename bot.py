@@ -453,6 +453,15 @@ def public_user_label(user_id: int) -> str:
     return f"{name} (@{username})" if username else name
 
 
+def task_public_user_label(job: TransferTask) -> str:
+    """Obtiene el nombre real capturado al iniciar la tarea, con fallback seguro."""
+    name = str(job.display_name or "").strip()
+    username = str(job.username or "").strip()
+    if name and name.casefold() != "usuario":
+        return f"{name} ({username})" if username else name
+    return public_user_label(job.user_id)
+
+
 def channel_prompt_completed(user_id: int) -> bool:
     """Indica si la invitación opcional ya se mostró y el usuario continuó."""
     completed = _load_json(USERS_DATA_FILE).get("channel_prompt_completed", {})
@@ -2592,7 +2601,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
             application.bot,
             "📥 ɴᴜᴇᴠᴀ ᴅᴇꜱᴄᴀʀɢᴀ",
             [
-                f"👤 Usuario: {public_user_label(job.user_id)}",
+                f"👤 Usuario: {task_public_user_label(job)}",
                 "",
                 "📄 Archivo:",
                 filename,

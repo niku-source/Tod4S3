@@ -39,6 +39,7 @@ from bot import (
     start_command,
     storage_expiry,
     task_detail_text,
+    task_public_user_label,
     transfer_complete_text,
     user_has_required_memberships,
     welcome_text,
@@ -208,6 +209,13 @@ class RequestedFeatureTests(unittest.TestCase):
         self.assertNotIn("12345", text)
         self.assertNotIn("abc123", text)
         self.assertNotIn("@ana", text)
+
+    def test_channel_user_label_uses_task_name_and_username(self):
+        job = TransferTask(
+            12345, 12345, "url", None, None,
+            username="@ana", display_name="Ana Pérez",
+        )
+        self.assertEqual(task_public_user_label(job), "Ana Pérez (@ana)")
 
     def test_generated_txt_filename_uses_uploaded_file_stem(self):
         self.assertEqual(link_txt_filename("My App (final).apk"), "My App (final).txt")
