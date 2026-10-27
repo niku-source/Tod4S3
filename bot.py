@@ -2866,13 +2866,16 @@ def membership_prompt_text(
     todus_label: str = "canal ToDusS3",
 ) -> str:
     return card("🌐 ᴄᴀɴᴀʟᴇꜱ ᴏꜰɪᴄɪᴀʟᴇꜱ", [
-        f"📢 {channel_label}",
-        f"👥 {group_label}",
-        f"☁️ {todus_label}",
+        "Únete a nuestros canales oficiales",
+        "para utilizar el servicio de",
+        "descargas ToDusS3.",
         "",
-        "Puedes visitarlos con los",
-        "botones. Pulsa Continuar",
-        "para abrir el menú del bot.",
+        f"1️⃣ {channel_label}",
+        f"2️⃣ {group_label}",
+        f"3️⃣ {todus_label}",
+        "",
+        "Después de unirte a todos,",
+        "Pulsa Continuar al bot ✅.",
     ])
 
 
