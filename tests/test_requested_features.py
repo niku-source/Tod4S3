@@ -229,12 +229,18 @@ class RequestedFeatureTests(unittest.TestCase):
 
     def test_main_keyboard_matches_reference_layout_with_inline_actions(self):
         markup = main_keyboard()
-        self.assertEqual([len(row) for row in markup.inline_keyboard], [1, 2, 2, 1])
-        self.assertEqual(markup.inline_keyboard[0][0].callback_data, "help:0")
-        self.assertEqual([button.callback_data for button in markup.inline_keyboard[1]], ["all_menu", "action_menu"])
-        self.assertEqual([button.callback_data for button in markup.inline_keyboard[2]], ["my_info", "balance"])
-        self.assertFalse(any("ID" in (button.text or "") for button in all_buttons(markup)))
-        self.assertFalse(any(button.url for button in all_buttons(markup)))
+        buttons = all_buttons(markup)
+        self.assertEqual([len(row) for row in markup.inline_keyboard], [1, 1, 2, 2, 2])
+        self.assertEqual([button.text for button in buttons], [
+            "📥 DESCARGAS", "💰 SALDO: 0$ · REFERIDOS", "❓ AYUDA", "📒 HISTORIAL",
+            "📋 COLA", "💬 SOPORTE", "📊 MI CUOTA", "🏆 TOP USUARIOS",
+        ])
+        self.assertEqual([button.callback_data for button in buttons], [
+            "downloads", "balance", "help:0", "open_history", "open_queue",
+            "support", "my_quota", "top:users",
+        ])
+        self.assertEqual([button.style for button in buttons], ["success"] + ["primary"] * 7)
+        self.assertFalse(any(button.url for button in buttons))
 
     def test_admin_balance_grant_persists_for_an_id(self):
         import bot

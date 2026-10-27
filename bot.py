@@ -1723,15 +1723,19 @@ def btn(text: str, **kwargs) -> InlineKeyboardButton:
 
 
 def main_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
-    balance_label = "💰 Saldo y planes"
-    if user_id is not None:
-        balance_label = f"💰 Saldo: {get_user_balance(user_id)}$ · Planes"
     return InlineKeyboardMarkup([
-        [btn("💡 ᴀᴘʀᴇɴᴅᴇ ʟᴀꜱ ꜰᴜɴᴄɪᴏɴᴇꜱ", callback_data="help:0")],
-        [btn("📄 ᴍᴇɴᴜ́ ᴄᴏᴍᴘʟᴇᴛᴏ", callback_data="all_menu"),
-         btn("⚙️ ᴀᴄᴄɪᴏɴᴇꜱ", callback_data="action_menu")],
-        [btn("❓ ᴍɪ ɪɴꜰᴏ", callback_data="my_info"), btn(balance_label, callback_data="balance")],
-        [btn("↗ ᴄᴏɴᴛᴀᴄᴛᴀʀ ᴀʟ ᴅᴜᴇñᴏ", callback_data="support")],
+        [InlineKeyboardButton("📥 DESCARGAS", callback_data="downloads", style="success")],
+        [InlineKeyboardButton(
+            f"💰 SALDO: {get_user_balance(user_id) if user_id is not None else 0}$ · REFERIDOS",
+            callback_data="balance",
+            style="primary",
+        )],
+        [InlineKeyboardButton("❓ AYUDA", callback_data="help:0", style="primary"),
+         InlineKeyboardButton("📒 HISTORIAL", callback_data="open_history", style="primary")],
+        [InlineKeyboardButton("📋 COLA", callback_data="open_queue", style="primary"),
+         InlineKeyboardButton("💬 SOPORTE", callback_data="support", style="primary")],
+        [InlineKeyboardButton("📊 MI CUOTA", callback_data="my_quota", style="primary"),
+         InlineKeyboardButton("🏆 TOP USUARIOS", callback_data="top:users", style="primary")],
     ])
 
 
