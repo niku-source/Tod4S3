@@ -94,7 +94,13 @@ CHANNEL_JOIN_URL = os.getenv("CHANNEL_JOIN_URL", "").strip() or "https://t.me/Da
 GROUP_JOIN_URL = os.getenv("GROUP_JOIN_URL", "").strip() or "https://t.me/grupozonaoscura"
 TODUS_CHANNEL_JOIN_URL = os.getenv("TODUS_CHANNEL_JOIN_URL", "").strip() or "https://t.me/darzPrbo"
 PUBLIC_CHANNEL_ID = os.getenv("PUBLIC_CHANNEL_ID", "").strip() or "@darzPrbo"
-LINK_EXPIRY_HOURS = 2
+# Horas que los archivos permanecen en la nube de ToDus antes del borrado
+# automático. 0 = los archivos nunca se borran solos; solo se eliminan
+# cuando el usuario o un admin lo piden explícitamente.
+try:
+    LINK_EXPIRY_HOURS = max(0, int(os.getenv("CLOUD_LINK_TTL_HOURS", "2").strip() or "2"))
+except ValueError:
+    LINK_EXPIRY_HOURS = 0
 
 _SMALL_CAPS_MAP = {
     "a": "ᴀ", "b": "ʙ", "c": "ᴄ", "d": "ᴅ", "e": "ᴇ", "f": "ꜰ",
@@ -256,7 +262,14 @@ PLANS = {
         "quota_period_days": 1,
     },
 }
-
+if LINK_EXPIRY_HOURS <= 0:
+    for _plan in PLANS.values():
+        _plan["storage_hours"] = 0
+        _plan["storage_label"] = "Permanente"
+elif LINK_EXPIRY_HOURS != 2:
+    for _plan in PLANS.values():
+        _plan["storage_hours"] = LINK_EXPIRY_HOURS
+        _plan["storage_label"] = f"{LINK_EXPIRY_HOURS} horas"
 # Cada usuario tiene su propia cola FIFO. Estos límites controlan cuántas
 # tareas puede mantener simultáneamente cada persona según su plan.
 PLAN_QUEUE_LIMITS = {
@@ -1108,6 +1121,8 @@ async def delete_history_entry_cloud(entry: dict) -> bool:
 async def cloud_expiration_monitor(application: Application) -> None:
     """Revisa periódicamente los TTL para que el borrado ocurra aunque nadie pulse botones."""
     while True:
+        if LINK_EXPIRY_HOURS <= 0:
+            return
         try:
             removed = await asyncio.to_thread(expire_cloud_files)
             if removed:
@@ -2075,8 +2090,10 @@ def history_detail_keyboard(entry: dict, index: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def storage_expiry(user_id: int, completed_at: datetime | None = None) -> datetime:
-    """Calcula la caducidad universal de los enlaces de nube: dos horas."""
+def storage_expiry(user_id: int, completed_at: datetime | None = None) -> datetime | None:
+    """Caducidad universal de los enlaces de nube; None = nunca expiran."""
+    if LINK_EXPIRY_HOURS <= 0:
+        return None
     base = completed_at or datetime.now(timezone.utc)
     return base + timedelta(hours=LINK_EXPIRY_HOURS)
 
@@ -2105,7 +2122,10 @@ def transfer_complete_text(filename: str = "", size: int = 0, parts: int = 1,
         f"📄 {safe_name}",
         f"📦 Tamaño: {_size_label(size)}",
         f"⏱️ Duración: {_duration_label(duration)}",
-        f"☁️ Enlace expira: {expiry_label(expires_at)}",
+        (
+            f"☁️ Enlace expira: {expiry_label(expires_at)}"
+            if expires_at else "☁️ El enlace no expira (archivo permanente)"
+        ),
         "",
         "Usa los botones para descargar, copiar, convertir o borrar.",
     ]
@@ -2624,7 +2644,8 @@ async def process_task(job: TransferTask, application: Application) -> None:
 
         # 💾 Guardar en historial persistente con TTL real de nube según el plan.
         completed_at = datetime.now(timezone.utc)
-        expires_at = storage_expiry(job.user_id, completed_at).isoformat()
+        stored_expiry = storage_expiry(job.user_id, completed_at)
+        expires_at = stored_expiry.isoformat() if stored_expiry else None
         try:
             save_task_history(job.user_id, {
                 "task_id": job.task_id,
