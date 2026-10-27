@@ -2020,11 +2020,20 @@ def download_menu_text() -> str:
 
 
 def download_prompt_text(source: str) -> str:
+    todus_note = []
+    if DELIVERY_MODE == "todus":
+        todus_note = [
+            "",
+            "📲 El archivo se enviará a tu chat de ToDus.",
+            "Incluye videos de YouTube y otros enlaces.",
+            "Si aún no lo hiciste, pulsa Registrar número ToDus.",
+        ]
     if source == "telegram":
         return card("📁 ᴍᴏᴅᴏ ᴛᴇʟᴇɢʀᴀᴍ", [
             "Envía o reenvía el",
             "archivo aquí para",
             "iniciar.",
+            *todus_note,
         ])
     return card("🔗 ᴍᴏᴅᴏ ᴇɴʟᴀᴄᴇ", [
         "Pega aquí el enlace",
@@ -2035,14 +2044,19 @@ def download_prompt_text(source: str) -> str:
         "",
         "Hasta 20 enlaces en",
         "un mensaje.",
+        *todus_note,
     ])
 
 
 def download_prompt_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
+    rows = []
+    if DELIVERY_MODE == "todus":
+        rows.append([btn("📱 ʀᴇɢɪꜱᴛʀᴀʀ ɴúᴍᴇʀᴏ ᴛᴏᴅᴜꜱ", callback_data="todus:register")])
+    rows.append([
         btn("⬅️ ᴀᴛʀáꜱ", callback_data="downloads"),
-        btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home"),
-    ]])
+        btn("🏠 ʜᴏᴍᴇ", callback_data="home"),
+    ])
+    return InlineKeyboardMarkup(rows)
 
 
 def contact_keyboard() -> InlineKeyboardMarkup:
@@ -3373,6 +3387,31 @@ async def todus_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     ]))
 
 
+def todus_registration_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[btn("🏠 ʜᴏᴍᴇ", callback_data="home")]])
+
+
+async def require_todus_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Bloquea una descarga hasta que el usuario indique su destino ToDus."""
+    if DELIVERY_MODE != "todus":
+        return True
+    user = update.effective_user
+    message = update.effective_message
+    if not user or not message or get_user_todus_number(user.id):
+        return True
+    await message.reply_text(
+        card("📱 ʀᴇɢɪꜱᴛʀᴀ ᴛᴜ ᴛᴏᴅᴜꜱ", [
+            "Antes de descargar, indica",
+            "el número cubano de tu cuenta ToDus.",
+            "",
+            "Pulsa el botón y envíalo",
+            "en el siguiente mensaje.",
+        ]),
+        reply_markup=InlineKeyboardMarkup([[btn("📱 ᴇɴᴠɪᴀʀ ɴúᴍᴇʀᴏ", callback_data="todus:register")]]),
+    )
+    return False
+
+
 async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_private_update(update):
         return
@@ -3467,6 +3506,21 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.message.reply_text(blocked_user_text())
         return
     register_user(user)
+    if query.data == "todus:register":
+        context.user_data["awaiting_todus_number"] = True
+        await query.answer()
+        await edit_query_message_text(
+            query.message,
+            card("📱 ᴇɴᴠíᴀ ᴛᴜ ɴúᴍᴇʀᴏ ᴛᴏᴅᴜꜱ", [
+                "Escribe ahora tu número cubano",
+                "asociado a ToDus.",
+                "",
+                "Ejemplo: 5358449084",
+                "También puedes escribirlo como 58449084.",
+            ]),
+            reply_markup=todus_registration_keyboard(),
+        )
+        return
     if query.data == "membership:verify":
         await query.answer()
         mark_channel_prompt_completed(user.id)
@@ -4671,6 +4725,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
             return
 
+    if context.user_data.get("awaiting_todus_number"):
+        number = _normalize_todus_number(text)
+        if not re.fullmatch(r"53\d{8}", number):
+            await message.reply_text(card("❌ ɴúᴍᴇʀᴏ ɪɴᴠáʟɪᴅᴏ", [
+                "Envía un número cubano válido.",
+                "Ejemplo: 5358449084",
+            ]), reply_markup=todus_registration_keyboard())
+            return
+        set_user_todus_number(user.id, number)
+        context.user_data.pop("awaiting_todus_number", None)
+        schedule_data_backup(context.application, "registro de número ToDus")
+        await message.reply_text(card("✅ ɴúᴍᴇʀᴏ ᴛᴏᴅᴜꜱ ɢᴜᴀʀᴅᴀᴅᴏ", [
+            f"Número: {{mono:{number}}}",
+            "",
+            "Ahora envía el archivo o enlace",
+            "y se entregará en tu chat de ToDus.",
+        ]), reply_markup=home_keyboard())
+        return
+
     if context.user_data.get("awaiting_support"):
         owner_id = parse_owner_id()
         if not owner_id:
@@ -4711,6 +4784,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     except ValueError as exc:
         await message.reply_text(sc(str(exc)))
         return
+    if DELIVERY_MODE == "todus" and not get_user_todus_number(user.id):
+        await require_todus_number(update, context)
+        return
     for source_url in source_urls:
         await enqueue_transfer(update, context, source_kind="url", source_url=source_url)
 
@@ -4731,6 +4807,9 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     allowed: set[int] = context.application.bot_data["allowed_users"]
     if allowed and user.id not in allowed and not is_owner(user.id):
         await message.reply_text(sc("Bot limitado a usuarios autorizados."))
+        return
+    if DELIVERY_MODE == "todus" and not get_user_todus_number(user.id):
+        await require_todus_number(update, context)
         return
     size_hint = None
     for media_name in ("document", "video", "animation", "audio", "voice", "video_note"):
