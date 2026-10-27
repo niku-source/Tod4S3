@@ -424,12 +424,13 @@ def register_user(user) -> bool:
         return False
 
 
-async def publish_channel_notice(bot_obj, title: str, body: str) -> bool:
+async def publish_channel_notice(bot_obj, title: str, body: str, *, reply_markup=None) -> bool:
     """Publica un aviso de actividad sin exponer IDs ni enlaces privados."""
     try:
         await bot_obj.send_message(
             chat_id=PUBLIC_CHANNEL_ID,
             text=card(title, [body]),
+            reply_markup=reply_markup,
             disable_web_page_preview=True,
         )
         return True
@@ -1774,20 +1775,21 @@ def btn(text: str, **kwargs) -> InlineKeyboardButton:
 
 def main_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("📥 DESCARGAS", callback_data="downloads")],
+        [InlineKeyboardButton("📥 DESCARGAS", callback_data="downloads", style="success")],
         [InlineKeyboardButton(
             f"💰 SALDO: {get_user_balance(user_id) if user_id is not None else 0}$ · REFERIDOS",
             callback_data="balance",
+            style="primary",
         )],
-        [InlineKeyboardButton("❓ AYUDA", callback_data="help:0"),
-         InlineKeyboardButton("📒 HISTORIAL", callback_data="open_history")],
-        [InlineKeyboardButton("📋 COLA", callback_data="open_queue"),
-         InlineKeyboardButton("💬 SOPORTE", callback_data="support")],
-        [InlineKeyboardButton("📊 MI CUOTA", callback_data="my_quota"),
-         InlineKeyboardButton("🏆 TOP USUARIOS", callback_data="top:users")],
+        [InlineKeyboardButton("❓ AYUDA", callback_data="help:0", style="primary"),
+         InlineKeyboardButton("📒 HISTORIAL", callback_data="open_history", style="primary")],
+        [InlineKeyboardButton("📋 COLA", callback_data="open_queue", style="primary"),
+         InlineKeyboardButton("💬 SOPORTE", callback_data="support", style="primary")],
+        [InlineKeyboardButton("📊 MI CUOTA", callback_data="my_quota", style="primary"),
+         InlineKeyboardButton("🏆 TOP USUARIOS", callback_data="top:users", style="primary")],
     ]
     if user_id is not None and is_owner(user_id):
-        rows.append([InlineKeyboardButton("⚙️ PANEL DE CREADOR", callback_data="admin:open")])
+        rows.append([InlineKeyboardButton("⚙️ PANEL DE CREADOR", callback_data="admin:open", style="primary")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -1959,6 +1961,16 @@ def download_keyboard(url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [btn("⬇️ Descargar", url=url), btn("📋 Copiar", copy_text=CopyTextButton(text=url))],
     ])
+
+
+def channel_download_keyboard(urls: list[str]) -> InlineKeyboardMarkup:
+    """Crea botones de descarga pública para el aviso del canal."""
+    rows = []
+    total = len(urls)
+    for index, url in enumerate(urls, 1):
+        label = "⬇️ DESCARGAR ARCHIVO" if total == 1 else f"⬇️ DESCARGAR PARTE {index}"
+        rows.append([btn(label, url=url)])
+    return InlineKeyboardMarkup(rows)
 
 
 def result_keyboard(url: str, task_id: str) -> InlineKeyboardMarkup:
@@ -2579,6 +2591,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
             f"Archivo: {filename}\n"
             f"Tamaño: {_size_label(size)}\n"
             "La descarga y subida se completó correctamente.",
+            reply_markup=channel_download_keyboard([url for _, url in links]),
         )
         if temp_path:
             temp_path.unlink(missing_ok=True)

@@ -13,6 +13,7 @@ from bot import (
     PLANS,
     btn,
     button_callback,
+    channel_download_keyboard,
     download_keyboard,
     download_menu_keyboard,
     download_menu_text,
@@ -159,6 +160,15 @@ class RequestedFeatureTests(unittest.TestCase):
         copy = next(button for button in all_buttons(markup) if button.copy_text)
         self.assertEqual(copy.copy_text.text, url)
 
+    def test_channel_download_keyboard_has_public_download_buttons(self):
+        one = channel_download_keyboard(["https://files.example/clip.mp4"])
+        self.assertEqual(len(one.inline_keyboard), 1)
+        self.assertEqual(one.inline_keyboard[0][0].url, "https://files.example/clip.mp4")
+        self.assertEqual(one.inline_keyboard[0][0].style, "success")
+        many = channel_download_keyboard(["https://files.example/1", "https://files.example/2"])
+        self.assertEqual(len(many.inline_keyboard), 2)
+        self.assertIn("ᴘᴀʀᴛᴇ", many.inline_keyboard[1][0].text)
+
     def test_download_method_menu_puts_two_methods_on_one_row(self):
         markup = download_menu_keyboard()
         self.assertEqual([len(row) for row in markup.inline_keyboard], [2, 1])
@@ -252,7 +262,10 @@ class RequestedFeatureTests(unittest.TestCase):
             "downloads", "balance", "help:0", "open_history", "open_queue",
             "support", "my_quota", "top:users",
         ])
-        self.assertEqual([button.style for button in buttons], [None] * 8)
+        self.assertEqual([button.style for button in buttons], [
+            "success", "primary", "primary", "primary",
+            "primary", "primary", "primary", "primary",
+        ])
         self.assertFalse(any(button.url for button in buttons))
 
     def test_creator_main_keyboard_has_creator_panel_button(self):
@@ -309,7 +322,8 @@ class RequestedFeatureTests(unittest.TestCase):
     def test_main_menu_does_not_show_membership_join_links(self):
         buttons = all_buttons(main_keyboard())
         self.assertFalse(any(button.url for button in buttons))
-        self.assertTrue(all(button.style is None for button in buttons))
+        self.assertEqual(buttons[0].style, "success")
+        self.assertTrue(all(button.style == "primary" for button in buttons[1:]))
 
     def test_membership_screen_names_missing_channel(self):
         text = membership_missing_text(["@canal_prueba"])

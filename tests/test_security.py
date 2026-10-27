@@ -110,7 +110,8 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("📊 MI CUOTA", labels)
         self.assertIn("🏆 TOP USUARIOS", labels)
         self.assertFalse(any(button.url for button in buttons))
-        self.assertTrue(all(button.style is None for button in buttons))
+        self.assertEqual(buttons[0].style, "success")
+        self.assertTrue(all(button.style == "primary" for button in buttons[1:]))
 
     def test_download_menu_offers_telegram_and_direct_url_routes(self):
         buttons = [button for row in download_menu_keyboard().inline_keyboard for button in row]
