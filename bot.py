@@ -2653,6 +2653,17 @@ async def my_quota_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 def welcome_text(user_id: int, user_name: str, username: str | None = None) -> str:
+    def preformatted_welcome(title: str, lines: list[str]) -> str:
+        rendered = card_with_credit(title, lines, preserve_title=True)
+        box, separator, footer = rendered.rpartition("\n\n")
+        # El contenido de <pre> ya es monoespaciado; quitar las marcas <code>
+        # internas del ID antes de escapar el bloque completo para HTML.
+        box = box.replace("<code>", "").replace("</code>", "")
+        return (
+            f"<pre>{html.escape(box, quote=False)}</pre>"
+            f"{separator}{html.escape(footer, quote=False)}"
+        )
+
     short_name = (user_name or "Usuario").split()[0][:14]
     username_label = f"@{username}" if username else "sin @usuario"
     identity_lines = [
@@ -2676,7 +2687,7 @@ def welcome_text(user_id: int, user_name: str, username: str | None = None) -> s
             "",
             "👑 Modo Creador Activo",
         ]
-        return card_with_credit(BOT_NAME, lines, preserve_title=True)
+        return preformatted_welcome(BOT_NAME, lines)
     plan = get_plan_info(get_user_plan(user_id))
     remaining = get_remaining_quota(user_id)
     plan_label = "Gratis · 1 GB de bienvenida" if plan["rank"] == 0 else f"{plan['badge']} {plan['display']}"
@@ -2701,7 +2712,7 @@ def welcome_text(user_id: int, user_name: str, username: str | None = None) -> s
         "",
         "🔥 Rápido · Seguro",
     ]
-    return card_with_credit(BOT_NAME, lines, preserve_title=True)
+    return preformatted_welcome(BOT_NAME, lines)
 
 
 def membership_keyboard(channel_label: str = "Canal", group_label: str = "Grupo") -> InlineKeyboardMarkup:
