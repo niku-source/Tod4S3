@@ -102,7 +102,7 @@ class PlatformDownloadTests(unittest.TestCase):
         ydl.extract_info.assert_called_once()
         progress.assert_called_once_with(4, 8)
 
-    def test_login_required_is_rejected_without_loading_cookies_or_retrying(self):
+    def test_login_required_is_rejected_without_loading_cookies_after_public_fallbacks(self):
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / "platform-download"
             ydl = MagicMock()
@@ -113,7 +113,7 @@ class PlatformDownloadTests(unittest.TestCase):
             with patch("platform_downloads._check_public_dns_target"), patch.object(
                 yt_dlp, "YoutubeDL", ydl_class
             ), patch.dict(os.environ, {"YTDLP_COOKIES_FILE": "/tmp/should-not-be-used.txt"}):
-                with self.assertRaisesRegex(ValueError, "solo admite contenido público"):
+                with self.assertRaisesRegex(ValueError, "YouTube bloqueó esta descarga"):
                     download_platform_video(
                         "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                         output,
@@ -123,7 +123,7 @@ class PlatformDownloadTests(unittest.TestCase):
         options = ydl_class.call_args.args[0]
         self.assertNotIn("cookiefile", options)
         self.assertNotIn("http_headers", options)
-        ydl.extract_info.assert_called_once()
+        self.assertEqual(ydl.extract_info.call_count, 4)
 
     def test_short_youtube_link_retries_403_with_web_client(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -152,7 +152,7 @@ class PlatformDownloadTests(unittest.TestCase):
         self.assertEqual((path.name, name, size), ("clip.mp4", "clip.mp4", 5))
         self.assertEqual(ydl_class.call_count, 2)
         retry_options = ydl_class.call_args.args[0]
-        self.assertEqual(retry_options["extractor_args"], {"youtube": {"player_client": ["web"]}})
+        self.assertEqual(retry_options["extractor_args"], {"youtube": {"player_client": ["mweb"]}})
 
     def test_download_aborts_when_progress_exceeds_limit(self):
         with tempfile.TemporaryDirectory() as folder:

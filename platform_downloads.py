@@ -153,37 +153,36 @@ def download_platform_video(
             "sign in", "not a bot", "login required", "private video",
             "members-only", "members only",
         )
-        if any(marker in lowered for marker in restricted_markers):
-            raise ValueError(
-                "La plataforma exige iniciar sesión o bloqueó la descarga automática. "
-                "TodusS3 solo admite contenido público y no usa cookies ni intenta eludir "
-                "controles de acceso."
-            ) from exc
-        # YouTube can issue a stale media URL that returns 403 even when the
-        # public video is available. Re-extract once with the web client so a
-        # fresh signed URL is generated. This does not load cookies or bypass
-        # private/login/DRM restrictions.
         host = (urlsplit(url).hostname or "").rstrip(".").lower()
         is_youtube_host = host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
-        if "403" in lowered and is_youtube_host:
-            retry_options = dict(base_options)
-            retry_options["extractor_args"] = {"youtube": {"player_client": ["web"]}}
-            retry_options["http_headers"] = {
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/131.0 Safari/537.36"
-                ),
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://www.youtube.com/",
-            }
-            try:
-                with YoutubeDL(retry_options) as downloader:
-                    downloader.extract_info(url, download=True)
-            except DownloadError as retry_exc:
-                message = str(retry_exc).strip()
-            else:
-                message = None
+        # YouTube may block the default web client on a data-center IP even
+        # for public videos. Try public clients that do not require cookies or
+        # access-control bypasses before reporting the block to the user.
+        should_retry_youtube = is_youtube_host and (
+            "403" in lowered or any(marker in lowered for marker in restricted_markers)
+        )
+        if should_retry_youtube:
+            for client in ("mweb", "android_vr", "android"):
+                retry_options = dict(base_options)
+                retry_options["extractor_args"] = {"youtube": {"player_client": [client]}}
+                try:
+                    with YoutubeDL(retry_options) as downloader:
+                        downloader.extract_info(url, download=True)
+                except DownloadError as retry_exc:
+                    message = str(retry_exc).strip()
+                    lowered = message.lower()
+                    continue
+                else:
+                    message = None
+                    break
         if message is not None:
+            if any(marker in lowered for marker in restricted_markers):
+                raise ValueError(
+                    "YouTube bloqueó esta descarga desde el servidor. "
+                    "El video puede ser público, pero requiere otra red o cookies "
+                    "de una sesión autorizada; el bot no usa cookies ni intenta eludir "
+                    "controles de acceso."
+                ) from exc
             raise ValueError(message[:300] or "No se pudo descargar el enlace público.") from exc
 
     candidates = [
