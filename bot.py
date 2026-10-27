@@ -425,7 +425,7 @@ def register_user(user) -> bool:
 
 
 async def publish_channel_notice(bot_obj, title: str, body: str) -> bool:
-    """Publica un aviso anónimo; nunca incluye usuario, ID, nombre de archivo ni enlace."""
+    """Publica un aviso de actividad sin exponer IDs ni enlaces privados."""
     try:
         await bot_obj.send_message(
             chat_id=PUBLIC_CHANNEL_ID,
@@ -436,6 +436,17 @@ async def publish_channel_notice(bot_obj, title: str, body: str) -> bool:
     except Exception as exc:
         log.warning("No se pudo publicar aviso en el canal (%s).", type(exc).__name__)
         return False
+
+
+def public_user_label(user_id: int) -> str:
+    """Devuelve el nombre/alias público guardado, sin exponer el ID."""
+    users = _load_json(USERS_DATA_FILE).get("users", {})
+    entry = users.get(str(user_id), {}) if isinstance(users, dict) else {}
+    if not isinstance(entry, dict):
+        return "Usuario"
+    name = str(entry.get("full_name") or entry.get("first_name") or "Usuario").strip()
+    username = str(entry.get("username") or "").strip().lstrip("@")
+    return f"{name} (@{username})" if username else name
 
 
 def channel_prompt_completed(user_id: int) -> bool:
@@ -2560,8 +2571,11 @@ async def process_task(job: TransferTask, application: Application) -> None:
         )
         await publish_channel_notice(
             application.bot,
-            "📥 ɴᴜᴇᴠᴀ ᴛʀᴀɴꜱꜰᴇʀᴇɴᴄɪᴀ",
-            "Una descarga y subida se completó correctamente.",
+            "📥 ɴᴜᴇᴠᴀ ᴅᴇꜱᴄᴀʀɢᴀ",
+            f"Usuario: {public_user_label(job.user_id)}\n"
+            f"Archivo: {filename}\n"
+            f"Tamaño: {_size_label(size)}\n"
+            "La descarga y subida se completó correctamente.",
         )
         if temp_path:
             temp_path.unlink(missing_ok=True)
@@ -2885,7 +2899,9 @@ async def complete_pending_referral(user_id: int, context: ContextTypes.DEFAULT_
     await publish_channel_notice(
         context.bot,
         "🎉 ɴᴜᴇᴠᴏ ʀᴇꜰᴇʀɪᴅᴏ",
-        "Se confirmó un referido y se acreditó saldo.",
+        f"Invitador: {public_user_label(referrer_id)}\n"
+        f"Referido: {public_user_label(user_id)}\n"
+        "Se confirmó el referido y se acreditó saldo.",
     )
     try:
         await context.bot.send_message(
@@ -2914,12 +2930,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if match:
             remember_pending_referral(user.id, int(match.group(1)))
     is_new_user = register_user(user)
-    if is_new_user:
-        await publish_channel_notice(
-            context.bot,
-            "👋 ɴᴜᴇᴠᴏ ᴜꜱᴜᴀʀɪᴏ",
-            "Una persona acaba de iniciar el bot.",
-        )
     if channel_prompt_completed(user.id):
         referral_notice = ""
         if await complete_pending_referral(user.id, context):

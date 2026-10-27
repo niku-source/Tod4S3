@@ -159,7 +159,30 @@ def download_platform_video(
                 "TodusS3 solo admite contenido público y no usa cookies ni intenta eludir "
                 "controles de acceso."
             ) from exc
-        raise ValueError(message[:300] or "No se pudo descargar el enlace público.") from exc
+        # YouTube can issue a stale media URL that returns 403 even when the
+        # public video is available. Re-extract once with the web client so a
+        # fresh signed URL is generated. This does not load cookies or bypass
+        # private/login/DRM restrictions.
+        if "403" in lowered and "youtube" in (urlsplit(url).hostname or "").lower():
+            retry_options = dict(base_options)
+            retry_options["extractor_args"] = {"youtube": {"player_client": ["web"]}}
+            retry_options["http_headers"] = {
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/131.0 Safari/537.36"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.youtube.com/",
+            }
+            try:
+                with YoutubeDL(retry_options) as downloader:
+                    downloader.extract_info(url, download=True)
+            except DownloadError as retry_exc:
+                message = str(retry_exc).strip()
+            else:
+                message = None
+        if message is not None:
+            raise ValueError(message[:300] or "No se pudo descargar el enlace público.") from exc
 
     candidates = [
         path for path in folder.iterdir()

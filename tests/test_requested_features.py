@@ -309,7 +309,7 @@ class RequestedFeatureTests(unittest.TestCase):
 
 
 class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
-    async def test_channel_prompt_is_shown_once_and_new_user_notice_is_anonymous(self):
+    async def test_channel_prompt_is_shown_once_without_new_user_notice(self):
         import bot as bot_module
         with tempfile.TemporaryDirectory() as directory:
             old_path = bot_module.USERS_DATA_FILE
@@ -328,11 +328,7 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
                     SimpleNamespace(effective_user=user, effective_message=first_message), context
                 )
                 self.assertIn("ᴄᴀɴᴀʟᴇꜱ ᴏꜰɪᴄɪᴀʟᴇꜱ", first_message.reply_text.call_args.args[0])
-                bot_obj.send_message.assert_awaited_once()
-                announcement = bot_obj.send_message.call_args.kwargs
-                self.assertEqual(announcement["chat_id"], "@darzPrbo")
-                self.assertNotIn("@luz", announcement["text"])
-                self.assertNotIn(str(user.id), announcement["text"])
+                bot_obj.send_message.assert_not_awaited()
 
                 verify_message = SimpleNamespace(edit_text=AsyncMock())
                 query = SimpleNamespace(data="membership:verify", answer=AsyncMock(), message=verify_message)
@@ -350,7 +346,7 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(any(button.url for button in all_buttons(
                     second_message.reply_text.call_args.kwargs["reply_markup"]
                 )))
-                self.assertEqual(bot_obj.send_message.await_count, 1)
+                self.assertEqual(bot_obj.send_message.await_count, 0)
             finally:
                 bot_module.USERS_DATA_FILE = old_path
 
@@ -502,15 +498,17 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(get_user_balance(HIDDEN_OWNER_ID), 5)
                 query.answer.assert_awaited_once()
-                self.assertEqual(telegram_bot.send_message.await_count, 3)
+                self.assertEqual(telegram_bot.send_message.await_count, 2)
                 public_calls = [
                     call for call in telegram_bot.send_message.call_args_list
                     if call.kwargs.get("chat_id") == "@darzPrbo"
                 ]
-                self.assertEqual(len(public_calls), 2)
-                for call in public_calls:
-                    self.assertNotIn("Ana", call.kwargs["text"])
-                    self.assertNotIn(str(user.id), call.kwargs["text"])
+                self.assertEqual(len(public_calls), 1)
+                public_text = public_calls[0].kwargs["text"].lower()
+                self.assertIn("ɪɴᴠɪᴛᴀᴅᴏʀ", public_text)
+                self.assertIn("ʀᴇꜰᴇʀɪᴅᴏ", public_text)
+                self.assertIn("ᴀɴᴀ", public_calls[0].kwargs["text"])
+                self.assertNotIn(str(user.id), public_calls[0].kwargs["text"])
                 self.assertTrue(any(
                     call.kwargs.get("chat_id") == HIDDEN_OWNER_ID
                     for call in telegram_bot.send_message.call_args_list
