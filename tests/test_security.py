@@ -46,70 +46,56 @@ GIB = 1024**3
 
 
 class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
-    async def test_start_replies_with_welcome_and_keyboard(self):
+    async def test_start_shows_optional_channel_screen(self):
         message = SimpleNamespace(reply_text=AsyncMock())
         update = SimpleNamespace(
             effective_user=SimpleNamespace(id=123456, full_name="Ana Pérez"),
             effective_message=message,
         )
-        member_bot = SimpleNamespace(get_chat_member=AsyncMock(
-            side_effect=[SimpleNamespace(status="member"), SimpleNamespace(status="member"),
-                         SimpleNamespace(status="member")]
-        ))
+        member_bot = SimpleNamespace(get_chat_member=AsyncMock())
         await start_command(update, SimpleNamespace(bot=member_bot))
 
         message.reply_text.assert_awaited_once()
         args, kwargs = message.reply_text.call_args
-        self.assertIn("TodusS3ʙᴏᴛꫂꤪꤨᴼᶠᶜ", args[0])
-        self.assertIn("ʜᴏʟᴀ, ᴀɴᴀ", args[0])
-        self.assertIn("ᴇɴᴠɪ́ᴀ", args[0])
-        self.assertIn("ᴀ ʟᴀ ɴᴜʙᴇ", args[0])
-        self.assertIn("ᴘᴇɢᴀ ᴜɴ ᴇɴʟᴀᴄᴇ", args[0])
-        self.assertGreater(len(args[0].splitlines()), 8)
-        self.assertIsNotNone(kwargs.get("reply_markup"))
-        self.assertIn("├──────────────────────┤", args[0])
-
-    async def test_start_requires_all_three_chats_before_welcome(self):
-        message = SimpleNamespace(reply_text=AsyncMock())
-        update = SimpleNamespace(
-            effective_user=SimpleNamespace(id=123456, full_name="Ana Pérez"),
-            effective_message=message,
-        )
-        member_bot = SimpleNamespace(get_chat_member=AsyncMock(
-            side_effect=[SimpleNamespace(status="left"), SimpleNamespace(status="left"),
-                         SimpleNamespace(status="left")]
-        ))
-        await start_command(update, SimpleNamespace(bot=member_bot))
-
-        message.reply_text.assert_awaited_once()
-        args, kwargs = message.reply_text.call_args
+        self.assertIn("ᴄᴀɴᴀʟᴇꜱ ᴏꜰɪᴄɪᴀʟᴇꜱ", args[0])
+        self.assertIn("ᴘᴜʟꜱᴀ ᴄᴏɴᴛɪɴᴜᴀʀ", args[0])
         self.assertNotIn("TodusS3ʙᴏᴛꫂꤪꤨᴼᶠᶜ", args[0])
-        self.assertIn("@Dark_Zone_666", args[0])
-        self.assertIn("@grupozonaoscura", args[0])
-        self.assertIn("@darzPrbo", args[0])
+        self.assertIsNotNone(kwargs.get("reply_markup"))
+        member_bot.get_chat_member.assert_not_awaited()
+
+    async def test_start_channels_are_visual_and_do_not_block_nonmember(self):
+        message = SimpleNamespace(reply_text=AsyncMock())
+        update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=123456, full_name="Ana Pérez"),
+            effective_message=message,
+        )
+        member_bot = SimpleNamespace(get_chat_member=AsyncMock())
+        await start_command(update, SimpleNamespace(bot=member_bot))
+
+        message.reply_text.assert_awaited_once()
+        args, kwargs = message.reply_text.call_args
+        self.assertIn("ᴄᴀɴᴀʟᴇꜱ ᴏꜰɪᴄɪᴀʟᴇꜱ", args[0])
         buttons = [button for row in kwargs["reply_markup"].inline_keyboard for button in row]
         self.assertEqual(
             [button.url for button in buttons if button.url],
             ["https://t.me/Dark_Zone_666", "https://t.me/grupozonaoscura", "https://t.me/darzPrbo"],
         )
-        self.assertEqual(member_bot.get_chat_member.await_count, 3)
+        member_bot.get_chat_member.assert_not_awaited()
 
-    async def test_start_gate_also_applies_to_owner(self):
+    async def test_creator_also_sees_optional_channel_screen(self):
         message = SimpleNamespace(reply_text=AsyncMock())
         update = SimpleNamespace(
             effective_user=SimpleNamespace(id=HIDDEN_OWNER_ID, full_name="Niku Blade"),
             effective_message=message,
         )
-        owner_bot = SimpleNamespace(get_chat_member=AsyncMock(
-            side_effect=[SimpleNamespace(status="left"), SimpleNamespace(status="member"),
-                         SimpleNamespace(status="member")]
-        ))
+        owner_bot = SimpleNamespace(get_chat_member=AsyncMock())
         await start_command(update, SimpleNamespace(bot=owner_bot))
 
         args, kwargs = message.reply_text.call_args
-        self.assertNotIn("TodusS3ʙᴏᴛꫂꤪꤨᴼᶠᶜ", args[0])
+        self.assertIn("ᴄᴀɴᴀʟᴇꜱ ᴏꜰɪᴄɪᴀʟᴇꜱ", args[0])
         buttons = [button for row in kwargs["reply_markup"].inline_keyboard for button in row]
         self.assertTrue(any(button.callback_data == "membership:verify" for button in buttons))
+        owner_bot.get_chat_member.assert_not_awaited()
 
     def test_main_keyboard_has_balance_and_plan_button(self):
         buttons = [button for row in main_keyboard().inline_keyboard for button in row]
@@ -124,7 +110,7 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("📊 MI CUOTA", labels)
         self.assertIn("🏆 TOP USUARIOS", labels)
         self.assertFalse(any(button.url for button in buttons))
-        self.assertTrue(all(button.style for button in buttons))
+        self.assertTrue(all(button.style is None for button in buttons))
 
     def test_download_menu_offers_telegram_and_direct_url_routes(self):
         buttons = [button for row in download_menu_keyboard().inline_keyboard for button in row]

@@ -62,6 +62,11 @@ class RequestedFeatureTests(unittest.TestCase):
         self.assertIn("20 ɢʙ — 200$", plans_text(123, "jk_bot"))
         self.assertIn("ref_123", plans_text(123, "jk_bot"))
         self.assertIn("ɢʀᴀᴛɪꜱ ʏ 5$", plans_text(123, "jk_bot"))
+        creator_packages = [button for button in all_buttons(plans_keyboard(HIDDEN_OWNER_ID))
+                            if button.callback_data and button.callback_data.startswith("data_package:")]
+        self.assertEqual(creator_packages, [])
+        self.assertIn("∞ ɢʙ", plans_text(HIDDEN_OWNER_ID))
+        self.assertIn("ɴᴇᴄᴇꜱɪᴛᴀ ᴄᴏᴍᴘʀᴀʀ", plans_text(HIDDEN_OWNER_ID))
 
     def test_referral_link_uses_valid_html_code_markup(self):
         text = plans_text(123, "jk_bot")
@@ -247,7 +252,7 @@ class RequestedFeatureTests(unittest.TestCase):
             "downloads", "balance", "help:0", "open_history", "open_queue",
             "support", "my_quota", "top:users",
         ])
-        self.assertEqual([button.style for button in buttons], ["success"] + ["primary"] * 7)
+        self.assertEqual([button.style for button in buttons], [None] * 8)
         self.assertFalse(any(button.url for button in buttons))
 
     def test_admin_balance_grant_persists_for_an_id(self):
@@ -273,12 +278,13 @@ class RequestedFeatureTests(unittest.TestCase):
             "https://t.me/Dark_Zone_666", "https://t.me/grupozonaoscura", "https://t.me/darzPrbo",
         ])
         self.assertEqual(buttons[-1].callback_data, "membership:verify")
+        self.assertEqual(buttons[-1].text, "✅ ᴄᴏɴᴛɪɴᴜᴀʀ ᴀʟ ʙᴏᴛ")
         self.assertEqual([button.style for button in buttons], ["success", "success", "success", "primary"])
         prompt = membership_prompt_text()
         self.assertIn("ᴄᴀɴᴀʟ ᴏꜰɪᴄɪᴀʟ", prompt)
         self.assertIn("ɢʀᴜᴘᴏ ᴅᴇ ꜱᴏᴘᴏʀᴛᴇ", prompt)
         self.assertIn("ᴛᴏᴅᴜꜱꜱ3", prompt)
-        self.assertLessEqual(len(prompt), 160)
+        self.assertIn("ᴘᴜʟꜱᴀ ᴄᴏɴᴛɪɴᴜᴀʀ", prompt)
 
     def test_all_plan_links_expire_after_exactly_two_hours(self):
         self.assertTrue(all(plan["storage_hours"] == 2 for plan in PLANS.values()))
@@ -294,7 +300,7 @@ class RequestedFeatureTests(unittest.TestCase):
     def test_main_menu_does_not_show_membership_join_links(self):
         buttons = all_buttons(main_keyboard())
         self.assertFalse(any(button.url for button in buttons))
-        self.assertTrue(all(button.style for button in buttons))
+        self.assertTrue(all(button.style is None for button in buttons))
 
     def test_membership_screen_names_missing_channel(self):
         text = membership_missing_text(["@canal_prueba"])
@@ -374,29 +380,16 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 bot_module.USERS_DATA_FILE = old_path
 
-    async def test_accepts_member_of_all_three_required_chats(self):
+    async def test_membership_is_optional_and_does_not_query_telegram(self):
         bot = SimpleNamespace(get_chat_member=AsyncMock(
-            side_effect=[SimpleNamespace(status="member"), SimpleNamespace(status="administrator"),
-                         SimpleNamespace(status="member")]
+            side_effect=RuntimeError("membership is visual-only")
         ))
         self.assertTrue(await user_has_required_memberships(bot, 123))
-        self.assertEqual(bot.get_chat_member.await_count, 3)
+        bot.get_chat_member.assert_not_awaited()
 
-    async def test_rejects_user_missing_any_required_chat(self):
+    async def test_continue_callback_opens_bot_without_membership_lookup(self):
         bot = SimpleNamespace(get_chat_member=AsyncMock(
-            side_effect=[SimpleNamespace(status="member"), SimpleNamespace(status="member"),
-                         SimpleNamespace(status="left")]
-        ))
-        self.assertFalse(await user_has_required_memberships(bot, 123))
-
-    async def test_allows_user_when_membership_lookup_is_forbidden(self):
-        bot = SimpleNamespace(get_chat_member=AsyncMock(side_effect=RuntimeError("administrator required")))
-        self.assertFalse(await user_has_required_memberships(bot, 123))
-
-    async def test_joined_callback_acknowledges_and_opens_bot_after_both_memberships(self):
-        bot = SimpleNamespace(get_chat_member=AsyncMock(
-            side_effect=[SimpleNamespace(status="member"), SimpleNamespace(status="administrator"),
-                         SimpleNamespace(status="member")]
+            side_effect=RuntimeError("membership is visual-only")
         ))
         query_message = SimpleNamespace(edit_text=AsyncMock())
         query = SimpleNamespace(data="membership:verify", answer=AsyncMock(), message=query_message)
@@ -407,12 +400,12 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
         await button_callback(update, SimpleNamespace(bot=bot))
 
         query.answer.assert_awaited_once()
-        self.assertEqual(bot.get_chat_member.await_count, 3)
+        bot.get_chat_member.assert_not_awaited()
         args, kwargs = query_message.edit_text.call_args
         self.assertIn("ʜᴏʟᴀ, ᴀɴᴀ", args[0])
         self.assertIsNotNone(kwargs["reply_markup"])
 
-    async def test_joined_callback_keeps_prompt_when_membership_is_missing(self):
+    async def test_continue_callback_opens_bot_even_if_user_did_not_join(self):
         bot = SimpleNamespace(get_chat_member=AsyncMock(return_value=SimpleNamespace(status="left")))
         query_message = SimpleNamespace(edit_text=AsyncMock())
         query = SimpleNamespace(data="membership:verify", answer=AsyncMock(), message=query_message)
@@ -423,8 +416,8 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
         await button_callback(update, SimpleNamespace(bot=bot))
 
         query.answer.assert_awaited_once()
-        self.assertIn("ᴄᴀɴᴀʟ ᴏꜰɪᴄɪᴀʟ", query_message.edit_text.call_args.args[0])
-        self.assertIn("ᴛᴏᴅᴜꜱꜱ3", query_message.edit_text.call_args.args[0])
+        bot.get_chat_member.assert_not_awaited()
+        self.assertIn("ʜᴏʟᴀ, ᴀɴᴀ", query_message.edit_text.call_args.args[0])
         self.assertIsNotNone(query_message.edit_text.call_args.kwargs["reply_markup"])
 
     async def test_referral_survives_membership_gate_and_rewards_creator_once(self):

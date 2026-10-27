@@ -1728,18 +1728,17 @@ def btn(text: str, **kwargs) -> InlineKeyboardButton:
 
 def main_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📥 DESCARGAS", callback_data="downloads", style="success")],
+        [InlineKeyboardButton("📥 DESCARGAS", callback_data="downloads")],
         [InlineKeyboardButton(
             f"💰 SALDO: {get_user_balance(user_id) if user_id is not None else 0}$ · REFERIDOS",
             callback_data="balance",
-            style="primary",
         )],
-        [InlineKeyboardButton("❓ AYUDA", callback_data="help:0", style="primary"),
-         InlineKeyboardButton("📒 HISTORIAL", callback_data="open_history", style="primary")],
-        [InlineKeyboardButton("📋 COLA", callback_data="open_queue", style="primary"),
-         InlineKeyboardButton("💬 SOPORTE", callback_data="support", style="primary")],
-        [InlineKeyboardButton("📊 MI CUOTA", callback_data="my_quota", style="primary"),
-         InlineKeyboardButton("🏆 TOP USUARIOS", callback_data="top:users", style="primary")],
+        [InlineKeyboardButton("❓ AYUDA", callback_data="help:0"),
+         InlineKeyboardButton("📒 HISTORIAL", callback_data="open_history")],
+        [InlineKeyboardButton("📋 COLA", callback_data="open_queue"),
+         InlineKeyboardButton("💬 SOPORTE", callback_data="support")],
+        [InlineKeyboardButton("📊 MI CUOTA", callback_data="my_quota"),
+         InlineKeyboardButton("🏆 TOP USUARIOS", callback_data="top:users")],
     ])
 
 
@@ -1769,22 +1768,33 @@ def plans_text(user_id: int, bot_username: str | None = None) -> str:
     """Muestra el saldo, la cuota disponible, los paquetes y el enlace personal."""
     balance = get_user_balance(user_id)
     link = referral_link(user_id, bot_username)
-    quota_label = "∞ GB" if is_owner(user_id) else data_quota_label(get_remaining_quota(user_id))
-    lines = [
-        f"💰 Saldo de referidos: {balance}$",
-        f"📦 Datos disponibles: {quota_label}",
-        "",
-        "🎁 Al unirte recibes 1 GB gratis y 5$.",
-        "👥 Cada referido válido te da 5$.",
-        "Los paquetes no vencen; se descuentan",
-        "al completar transferencias. Si se agotan,",
-        "compra otro con saldo de referidos.",
-        "",
-        "📋 Paquetes disponibles:",
-        *[f"• {item['name']} — {item['price']}$" for item in DATA_PACKAGES.values()],
-        "",
-        f"🔗 Tu enlace copiable:\n{{mono:{link}}}",
-    ]
+    if is_owner(user_id):
+        lines = [
+            f"💰 Saldo de referidos: {balance}$",
+            "📦 Datos disponibles: ∞ GB",
+            "",
+            "Tu cuenta Creador conserva",
+            "los datos ilimitados; no",
+            "necesita comprar paquetes.",
+            "👥 Cada referido válido te da 5$.",
+            "",
+            f"🔗 Tu enlace copiable:\n{{mono:{link}}}",
+        ]
+    else:
+        lines = [
+            f"💰 Saldo de referidos: {balance}$",
+            f"📦 Datos disponibles: {data_quota_label(get_remaining_quota(user_id))}",
+            "",
+            "🎁 Al unirte recibes 1 GB gratis y 5$.",
+            "👥 Cada referido válido te da 5$.",
+            "Los paquetes no vencen; se descuentan",
+            "al completar transferencias.",
+            "",
+            "📋 Compra con saldo de referidos:",
+            *[f"• {item['name']} — {item['price']}$" for item in DATA_PACKAGES.values()],
+            "",
+            f"🔗 Tu enlace copiable:\n{{mono:{link}}}",
+        ]
     return f"{card('👥 ʀᴇꜰᴇʀɪᴅᴏꜱ ʏ ꜱᴀʟᴅᴏ', lines)}\n\n{BOT_FOOTER}"
 
 
@@ -2718,7 +2728,7 @@ def membership_keyboard(
     if TODUS_CHANNEL_JOIN_URL:
         join_buttons.append(btn(f"☁️ {todus_label}", url=TODUS_CHANNEL_JOIN_URL, style="success"))
     rows = [join_buttons[index:index + 2] for index in range(0, len(join_buttons), 2)]
-    rows.append([btn("✅ Ya me uní", callback_data="membership:verify", style="primary")])
+    rows.append([btn("✅ Continuar al bot", callback_data="membership:verify", style="primary")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -2727,10 +2737,15 @@ def membership_prompt_text(
     group_label: str = "grupo de soporte",
     todus_label: str = "canal ToDusS3",
 ) -> str:
-    return sc(
-        f"Únete a {channel_label}, {group_label} y {todus_label}; "
-        "después pulsa «Ya me uní»."
-    )
+    return card("🌐 ᴄᴀɴᴀʟᴇꜱ ᴏꜰɪᴄɪᴀʟᴇꜱ", [
+        f"📢 {channel_label}",
+        f"👥 {group_label}",
+        f"☁️ {todus_label}",
+        "",
+        "Puedes visitarlos con los",
+        "botones. Pulsa Continuar",
+        "para abrir el menú del bot.",
+    ])
 
 
 async def required_chat_labels(bot_obj) -> tuple[str, str, str]:
@@ -2809,10 +2824,8 @@ async def check_required_memberships(bot_obj, user_id: int) -> tuple[bool, bool]
 
 
 async def user_has_required_memberships(bot_obj, user_id: int) -> bool:
-    is_member, check_failed = await check_required_memberships(bot_obj, user_id)
-    # Si Telegram no permite consultar el miembro, no hay confirmación de
-    # pertenencia: se bloquea de forma segura en vez de conceder acceso.
-    return is_member and not check_failed
+    """Los canales son informativos: la membresía no bloquea el uso del bot."""
+    return True
 
 
 async def ensure_membership(
@@ -2821,30 +2834,17 @@ async def ensure_membership(
     *,
     allow_owner: bool = True,
 ) -> bool:
+    """Conserva compatibilidad con handlers antiguos; la membresía es opcional."""
     if not is_private_update(update):
         return False
     user = update.effective_user
-    if not user or (allow_owner and is_owner(user.id)):
-        return True
-    register_user(user)
-    is_member, check_failed, missing = await check_required_memberships_detailed(context.bot, user.id)
-    if is_member:
-        return True
-    message = update.effective_message
-    if message:
-        if check_failed:
-            await message.reply_text(membership_error_text(), reply_markup=membership_keyboard())
-            return False
-        labels = await required_chat_labels(context.bot)
-        await message.reply_text(
-            membership_missing_text(missing) + "\n\n" + membership_prompt_text(*labels),
-            reply_markup=membership_keyboard(*labels),
-        )
-    return False
+    if user:
+        register_user(user)
+    return True
 
 
 async def complete_pending_referral(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Acredita un referido pendiente y notifica al invitador tras pasar el gate."""
+    """Acredita el referido pendiente y avisa al invitador al continuar al bot."""
     referrer_id = apply_pending_referral(user_id)
     if referrer_id is None:
         return False
@@ -2875,18 +2875,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         match = re.fullmatch(r"ref_(\d{1,20})", str(args[0]).strip(), re.IGNORECASE)
         if match:
             remember_pending_referral(user.id, int(match.group(1)))
-    if not await ensure_membership(update, context, allow_owner=False):
-        return
-    referral_notice = ""
-    if await complete_pending_referral(user.id, context):
-        referral_notice = "\n\n🎁 Recibiste 1 GB gratis y 5$ de bienvenida por entrar con un enlace de invitación."
+    register_user(user)
     await update.effective_message.reply_text(
-        welcome_text(
-            user.id,
-            getattr(user, "full_name", "") or getattr(user, "first_name", ""),
-            getattr(user, "username", None),
-        ) + referral_notice,
-        reply_markup=main_keyboard(user.id),
+        membership_prompt_text(),
+        reply_markup=membership_keyboard(),
     )
 
 
@@ -2981,30 +2973,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     register_user(user)
     if query.data == "membership:verify":
         await query.answer()
-        is_member, check_failed, missing = await check_required_memberships_detailed(context.bot, user.id)
-        if is_member:
-            referral_notice = ""
-            if await complete_pending_referral(user.id, context):
-                referral_notice = "\n\n🎁 Recibiste 1 GB gratis y 5$ de bienvenida por entrar con un enlace de invitación."
-            await query.message.edit_text(
-                welcome_text(
-                    user.id,
-                    getattr(user, "full_name", "") or getattr(user, "first_name", ""),
-                    getattr(user, "username", None),
-                ) + referral_notice,
-                reply_markup=main_keyboard(user.id),
-            )
-        else:
-            labels = await required_chat_labels(context.bot)
-            prompt = membership_error_text() if check_failed else (
-                membership_missing_text(missing)
-                + "\n\n"
-                + membership_prompt_text(*labels)
-            )
-            await query.message.edit_text(
-                prompt,
-                reply_markup=membership_keyboard(*labels),
-            )
+        referral_notice = ""
+        if await complete_pending_referral(user.id, context):
+            referral_notice = "\n\n🎁 Recibiste 1 GB gratis y 5$ de bienvenida por entrar con un enlace de invitación."
+        await query.message.edit_text(
+            welcome_text(
+                user.id,
+                getattr(user, "full_name", "") or getattr(user, "first_name", ""),
+                getattr(user, "username", None),
+            ) + referral_notice,
+            reply_markup=main_keyboard(user.id),
+        )
         return
     # El saldo/planes debe abrirse directamente desde la botonera principal;
     # no debe quedar bloqueado por una comprobación de membresía que falle.
