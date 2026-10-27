@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
 import socket
 import time
 from functools import lru_cache
@@ -15,6 +16,128 @@ PLATFORM_HOST_HINTS = {
     "tiktok.com", "twitter.com", "x.com", "reddit.com", "twitch.tv",
 }
 YOUTUBE_PUBLIC_CLIENTS = ("mweb", "android_vr", "android", "tv_embedded", "mediaconnect")
+CNV_ORIGIN = "https://frame.y2meta-uk.com"
+CNV_KEY_URL = "https://cnv.cx/v2/sanity/key"
+CNV_CONVERTER_URL = "https://cnv.cx/v2/converter"
+
+
+def is_youtube_url(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").rstrip(".").lower()
+    return host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
+
+
+def _youtube_video_id(url: str) -> str | None:
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    host = (parts.hostname or "").rstrip(".").lower()
+    if host == "youtu.be":
+        candidate = parts.path.lstrip("/").split("/")[0]
+        return candidate or None
+    if parts.query:
+        from urllib.parse import parse_qs
+
+        value = parse_qs(parts.query).get("v")
+        if value and value[0]:
+            return value[0]
+    segments = [item for item in parts.path.split("/") if item]
+    for index, segment in enumerate(segments):
+        if segment in ("shorts", "embed", "live") and index + 1 < len(segments):
+            return segments[index + 1]
+    return None
+
+
+def _safe_media_name(value: str, fallback: str) -> str:
+    cleaned = re.sub(r"[^\w\s()\[\].-]", "", value or "").strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    return (cleaned[:160] or fallback)
+
+
+def _cnv_youtube_download(
+    url: str,
+    folder: Path,
+    *,
+    max_bytes: int,
+    max_duration_seconds: int,
+    progress_hook=None,
+    is_cancelled=None,
+) -> Path:
+    """Download a public YouTube video through the public cnv.cx converter.
+
+    The same public conversion service is used by the working WhatsApp bot
+    base (webmiku-md): it resolves the media on its own network, so it keeps
+    working when YouTube throttles direct yt-dlp access from data-center
+    IPs. No cookies, login or access-control bypass is involved.
+    """
+    import requests
+
+    video_id = _youtube_video_id(url)
+    if not video_id or len(video_id) != 11:
+        raise ValueError("No se pudo identificar el ID del video de YouTube.")
+
+    headers = {"User-Agent": "Mozilla/5.0", "Origin": CNV_ORIGIN, "Accept": "application/json"}
+    key_response = requests.get(f"{CNV_KEY_URL}?id={video_id}", headers=headers, timeout=20)
+    key_response.raise_for_status()
+    key = key_response.json().get("key")
+    if not key:
+        raise ValueError("El servicio de descarga no emitió la clave temporal.")
+
+    started_at = time.monotonic()
+    body = {
+        "link": url,
+        "format": "mp4",
+        "videoQuality": "720",
+        "filenameStyle": "pretty",
+    }
+    converted = requests.post(
+        CNV_CONVERTER_URL,
+        data=body,
+        headers={**headers, "key": key},
+        timeout=60,
+    )
+    converted.raise_for_status()
+    payload = converted.json()
+    if payload.get("error"):
+        raise ValueError(str(payload.get("errorMsg") or "El servicio de descarga rechazó el video."))
+    direct = payload.get("url") or ""
+    if not direct.startswith("http"):
+        raise ValueError("El servicio de descarga no devolvió un archivo.")
+
+    suggested_name = _safe_media_name(payload.get("filename") or "", video_id)
+    if not suggested_name.lower().endswith(".mp4"):
+        suggested_name = f"{suggested_name}.mp4"
+    target = folder / suggested_name
+
+    received = 0
+    with requests.get(
+        direct,
+        headers={"User-Agent": "Mozilla/5.0", "Referer": f"{CNV_ORIGIN}/"},
+        stream=True,
+        timeout=(30, 120),
+    ) as response:
+        response.raise_for_status()
+        total = int(response.headers.get("content-length") or 0)
+        if max_bytes > 0 and total > max_bytes:
+            raise ValueError(f"El vídeo supera el límite de {max_bytes} bytes.")
+        with target.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=1 << 16):
+                if is_cancelled and is_cancelled():
+                    raise ValueError("Descarga cancelada.")
+                if max_duration_seconds > 0 and time.monotonic() - started_at > max_duration_seconds:
+                    raise ValueError("Se agotó el tiempo máximo de descarga.")
+                if not chunk:
+                    continue
+                received += len(chunk)
+                if max_bytes > 0 and received > max_bytes:
+                    raise ValueError(f"El vídeo supera el límite de {max_bytes} bytes.")
+                handle.write(chunk)
+                if progress_hook:
+                    progress_hook(received, total)
+    if received <= 0:
+        target.unlink(missing_ok=True)
+        raise ValueError("El servicio de descarga devolvió un archivo vacío.")
+    return target
 
 
 @lru_cache(maxsize=512)
@@ -106,6 +229,33 @@ def download_platform_video(
     folder = Path(output_dir)
     folder.mkdir(parents=True, exist_ok=True)
     started_at = time.monotonic()
+
+    # YouTube suele bloquear las IPs de data-center con las que trabaja
+    # yt-dlp ("Sign in to confirm you're not a bot"), incluso con videos
+    # públicos. El conversor público cnv.cx resuelve el video en su propia
+    # red y sigue funcionando, así que se intenta primero y yt-dlp queda
+    # como respaldo.
+    if is_youtube_url(url):
+        try:
+            cnv_path = _cnv_youtube_download(
+                url,
+                folder,
+                max_bytes=max_bytes,
+                max_duration_seconds=max_duration_seconds,
+                progress_hook=progress_hook,
+                is_cancelled=is_cancelled,
+            )
+            size = cnv_path.stat().st_size
+            if size > 0:
+                return cnv_path, cnv_path.name, size
+            cnv_path.unlink(missing_ok=True)
+        except Exception as cnv_error:
+            if is_cancelled and is_cancelled():
+                raise RuntimeError("Descarga cancelada.") from cnv_error
+            log.warning("Ruta cnv.cx falló para %s: %s", url, cnv_error)
+            for stale in folder.iterdir():
+                if stale.is_file():
+                    stale.unlink(missing_ok=True)
 
     def check_progress(data):
         if max_duration_seconds > 0 and time.monotonic() - started_at > max_duration_seconds:
