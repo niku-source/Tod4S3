@@ -15,10 +15,13 @@ from bot import (
     link_txt_filename,
     main_keyboard,
     apply_referral,
+    add_daily_usage,
+    get_remaining_quota,
     get_user_balance,
     grant_user_balance,
     plans_keyboard,
     plans_text,
+    purchase_data_package,
     quota_exhausted_text,
     quota_lines,
     quota_exhausted_keyboard,
@@ -41,15 +44,18 @@ def all_buttons(markup):
 
 
 class RequestedFeatureTests(unittest.TestCase):
-    def test_referral_menu_keeps_share_and_copy_without_purchase_actions(self):
+    def test_referral_menu_keeps_share_copy_and_all_data_package_actions(self):
         markup = plans_keyboard(123, "jk_bot")
         buttons = all_buttons(markup)
-        self.assertFalse(any(button.callback_data and button.callback_data.startswith("plans:") for button in buttons))
+        package_buttons = [button for button in buttons if button.callback_data and button.callback_data.startswith("data_package:select:")]
+        self.assertEqual(len(package_buttons), 6)
         self.assertTrue(any(button.copy_text and "ref_123" in button.copy_text.text for button in buttons))
         self.assertTrue(any(button.url and "t.me/share/url" in button.url for button in buttons))
         self.assertIn("5$", plans_text(123, "jk_bot"))
+        self.assertIn("500 ᴍʙ — 5$", plans_text(123, "jk_bot"))
+        self.assertIn("20 ɢʙ — 200$", plans_text(123, "jk_bot"))
         self.assertIn("ref_123", plans_text(123, "jk_bot"))
-        self.assertNotIn("Comprar", plans_text(123, "jk_bot"))
+        self.assertIn("ɢʀᴀᴛɪꜱ ʏ 5$", plans_text(123, "jk_bot"))
 
     def test_referral_link_uses_valid_html_code_markup(self):
         text = plans_text(123, "jk_bot")
@@ -91,11 +97,48 @@ class RequestedFeatureTests(unittest.TestCase):
             finally:
                 bot.USERS_DATA_FILE = old_path
 
-    def test_quota_exhausted_has_no_purchase_action(self):
+    def test_quota_exhausted_offers_package_purchase_and_quota_actions(self):
         buttons = all_buttons(quota_exhausted_keyboard())
-        self.assertNotIn("plans:buy", [button.callback_data for button in buttons])
+        self.assertIn("balance", [button.callback_data for button in buttons])
         self.assertIn("my_quota", [button.callback_data for button in buttons])
-        self.assertIn("ʀᴇɪɴɪᴄɪᴀ", quota_exhausted_text())
+        self.assertIn("ᴘᴀꞯᴜᴇᴛᴇ ᴅᴇ", quota_exhausted_text())
+        self.assertNotIn("ʀᴇɪɴɪᴄɪᴀ", quota_exhausted_text())
+
+    def test_package_purchase_spends_referral_balance_and_adds_non_expiring_quota(self):
+        import bot
+        with tempfile.TemporaryDirectory() as directory:
+            old_users, old_usage = bot.USERS_DATA_FILE, bot.USAGE_DATA_FILE
+            bot.USERS_DATA_FILE = str(Path(directory) / "users.json")
+            bot.USAGE_DATA_FILE = str(Path(directory) / "usage.json")
+            try:
+                bot._save_json(bot.USERS_DATA_FILE, {"users": {"123": {"user_id": 123, "balance": 5}}})
+                ok, reason, balance, remaining = purchase_data_package(123, "500mb")
+                self.assertTrue(ok)
+                self.assertEqual(reason, "ok")
+                self.assertEqual(balance, 0)
+                self.assertEqual(remaining, bot.GIB + 500 * bot.MIB)
+                self.assertEqual(get_user_balance(123), 0)
+                self.assertEqual(get_remaining_quota(123), bot.GIB + 500 * bot.MIB)
+                add_daily_usage(123, 100 * bot.MIB)
+                self.assertEqual(get_remaining_quota(123), bot.GIB + 400 * bot.MIB)
+            finally:
+                bot.USERS_DATA_FILE, bot.USAGE_DATA_FILE = old_users, old_usage
+
+    def test_package_purchase_rejects_insufficient_balance_without_changing_quota(self):
+        import bot
+        with tempfile.TemporaryDirectory() as directory:
+            old_path = bot.USERS_DATA_FILE
+            bot.USERS_DATA_FILE = str(Path(directory) / "users.json")
+            try:
+                bot._save_json(bot.USERS_DATA_FILE, {"users": {"123": {"user_id": 123, "balance": 5}}})
+                ok, reason, balance, remaining = purchase_data_package(123, "1gb")
+                self.assertFalse(ok)
+                self.assertEqual(reason, "insufficient")
+                self.assertEqual(balance, 5)
+                self.assertEqual(remaining, bot.GIB)
+                self.assertEqual(get_user_balance(123), 5)
+            finally:
+                bot.USERS_DATA_FILE = old_path
 
     def test_download_keyboard_has_one_tap_copy_and_compact_row(self):
         url = "https://files.example/movie.mp4"
@@ -168,11 +211,12 @@ class RequestedFeatureTests(unittest.TestCase):
         self.assertIn("ᴄʀᴇᴀᴅᴏʀ: @Niku_Blade", text)
         self.assertTrue(text.endswith("\n\nɴɪᴋᴜ_ʙʟᴀᴅᴇꫂꤪꤨᴼᶠᶜ"))
 
-    def test_main_keyboard_puts_downloads_on_top_and_other_buttons_in_pairs(self):
+    def test_main_keyboard_matches_reference_layout_with_inline_actions(self):
         markup = main_keyboard()
-        self.assertEqual([len(row) for row in markup.inline_keyboard], [1, 1, 2, 2, 2])
-        self.assertEqual(markup.inline_keyboard[0][0].callback_data, "downloads")
-        self.assertEqual(markup.inline_keyboard[1][0].callback_data, "balance")
+        self.assertEqual([len(row) for row in markup.inline_keyboard], [1, 2, 2, 1])
+        self.assertEqual(markup.inline_keyboard[0][0].callback_data, "help:0")
+        self.assertEqual([button.callback_data for button in markup.inline_keyboard[1]], ["all_menu", "action_menu"])
+        self.assertEqual([button.callback_data for button in markup.inline_keyboard[2]], ["my_info", "balance"])
         self.assertFalse(any("ID" in (button.text or "") for button in all_buttons(markup)))
         self.assertFalse(any(button.url for button in all_buttons(markup)))
 
@@ -248,6 +292,47 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("<code>", text)
                 buttons = all_buttons(query_message.edit_text.call_args.kwargs["reply_markup"])
                 self.assertTrue(any(button.copy_text and "ref_123456" in button.copy_text.text for button in buttons))
+            finally:
+                bot_module.USERS_DATA_FILE = old_path
+
+    async def test_package_confirmation_callback_purchases_and_edits_same_message(self):
+        import bot as bot_module
+        with tempfile.TemporaryDirectory() as directory:
+            old_path = bot_module.USERS_DATA_FILE
+            bot_module.USERS_DATA_FILE = str(Path(directory) / "users.json")
+            try:
+                bot_module._save_json(bot_module.USERS_DATA_FILE, {"users": {
+                    "123456": {"user_id": 123456, "balance": 5},
+                }})
+                query_message = SimpleNamespace(edit_text=AsyncMock())
+                query = SimpleNamespace(
+                    data="data_package:confirm:500mb",
+                    answer=AsyncMock(),
+                    message=query_message,
+                )
+                update = SimpleNamespace(
+                    callback_query=query,
+                    effective_user=SimpleNamespace(
+                        id=123456, full_name="Ana Pérez", first_name="Ana", username="ana"
+                    ),
+                )
+                context = SimpleNamespace(
+                    bot=SimpleNamespace(),
+                    application=SimpleNamespace(bot_data={"bot_username": "real_bot"}),
+                    user_data={},
+                )
+
+                await button_callback(update, context)
+
+                query.answer.assert_awaited_once()
+                self.assertIn("500 ᴍʙ", query_message.edit_text.call_args.args[0])
+                markup = query_message.edit_text.call_args.kwargs["reply_markup"]
+                self.assertTrue(any(
+                    button.callback_data == "data_package:select:1gb"
+                    for button in all_buttons(markup)
+                ))
+                self.assertEqual(get_user_balance(123456), 0)
+                self.assertEqual(get_remaining_quota(123456), bot_module.GIB + 500 * bot_module.MIB)
             finally:
                 bot_module.USERS_DATA_FILE = old_path
 
@@ -336,7 +421,8 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(get_user_balance(HIDDEN_OWNER_ID), 5)
                 query.answer.assert_awaited_once()
                 telegram_bot.send_message.assert_awaited_once()
-                self.assertIn("Recibiste 5$ de bienvenida", message.edit_text.call_args.args[0])
+                self.assertIn("1 GB gratis", message.edit_text.call_args.args[0])
+                self.assertIn("5$ de bienvenida", message.edit_text.call_args.args[0])
                 invited = bot_module._load_json(bot_module.USERS_DATA_FILE)["users"][str(user.id)]
                 self.assertTrue(invited["referral_rewarded"])
             finally:

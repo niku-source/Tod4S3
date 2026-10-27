@@ -57,7 +57,9 @@ El bot restaura primero la copia fijada y luego inicia MTProto. Guarda automáti
 
 ## Saldo y referidos
 
-Los usuarios reciben un saldo de bienvenida de 5$ y pueden compartir su enlace personal para invitar a otras personas. Cada invitación válida acredita 5$ una sola vez. El saldo y el enlace se consultan desde **Saldo y referidos**. El bot no ofrece compras de planes ni pagos; los planes VIP, si se necesitan, se asignan manualmente desde el panel administrativo.
+Cada usuario recibe al registrarse **1 GB de datos gratis** y **5$ de saldo virtual**. Cada referido válido añade 5$ al saldo del invitador, una sola vez. Cuando se agota la cuota, el usuario puede comprar desde **Saldo y planes** usando ese saldo virtual (no se procesa dinero real): 500 MB por 5$, 1 GB por 10$, 2 GB por 20$, 3 GB por 30$, 5 GB por 50$ o 20 GB por 200$.
+
+Los paquetes se acumulan, no vencen por tiempo y solo se descuentan cuando termina correctamente una transferencia. El botón de saldo muestra el enlace personal, el saldo, los paquetes y sus acciones de compra dentro del mismo mensaje. Los roles VIP que asigne un administrador siguen siendo independientes de estos paquetes de datos.
 
 ## Límites de archivos
 

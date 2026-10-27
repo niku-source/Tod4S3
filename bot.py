@@ -67,6 +67,15 @@ MAX_REDIRECTS = 5
 URL_MAX_CHARS = 2048
 MIB = 1024 ** 2
 GIB = 1024 ** 3
+FREE_JOIN_QUOTA_BYTES = GIB
+DATA_PACKAGES = {
+    "500mb": {"name": "500 MB", "bytes": 500 * MIB, "price": 5},
+    "1gb": {"name": "1 GB", "bytes": GIB, "price": 10},
+    "2gb": {"name": "2 GB", "bytes": 2 * GIB, "price": 20},
+    "3gb": {"name": "3 GB", "bytes": 3 * GIB, "price": 30},
+    "5gb": {"name": "5 GB", "bytes": 5 * GIB, "price": 50},
+    "20gb": {"name": "20 GB", "bytes": 20 * GIB, "price": 200},
+}
 BOT_API_DOWNLOAD_LIMIT = 20 * MIB
 
 # ═══════════════════════════════════════════════════════════════
@@ -188,8 +197,8 @@ PLANS = {
     "free": {
         "name": "ɢʀᴀᴛɪꜱ",
         "display": "Plan Gratis",
-        "daily_bytes": 5 * GIB,
-        "daily_label": "5.00 GB",
+        "daily_bytes": GIB,
+        "daily_label": "1.00 GB",
         "badge": "🆓",
         "rank": 0,
         "storage_hours": 12,
@@ -359,6 +368,22 @@ def _save_json(path: str, data: dict) -> None:
         log.error(f"No se pudo guardar {path}: {e}")
 
 
+def _ensure_data_quota_fields(entry: dict) -> dict:
+    """Initializes a one-time free 1 GB quota without resetting existing balances."""
+    try:
+        remaining = max(0, int(entry.get("data_quota_remaining_bytes", FREE_JOIN_QUOTA_BYTES)))
+    except (TypeError, ValueError):
+        remaining = FREE_JOIN_QUOTA_BYTES
+    try:
+        total = max(remaining, int(entry.get("data_quota_total_bytes", FREE_JOIN_QUOTA_BYTES)))
+    except (TypeError, ValueError):
+        total = max(remaining, FREE_JOIN_QUOTA_BYTES)
+    entry["data_quota_remaining_bytes"] = remaining
+    entry["data_quota_total_bytes"] = total
+    entry.setdefault("data_quota_used_bytes", max(0, total - remaining))
+    return entry
+
+
 def register_user(user) -> None:
     """Registra o actualiza al usuario que interactúa con el bot."""
     if not user or is_owner(getattr(user, "id", 0)):
@@ -371,8 +396,11 @@ def register_user(user) -> None:
             users = {}
         key = str(int(user.id))
         entry = users.get(key, {})
+        if not isinstance(entry, dict):
+            entry = {}
         entry.setdefault("balance", REFERRAL_START_BALANCE)
         entry.setdefault("welcome_reward", REFERRAL_START_BALANCE)
+        _ensure_data_quota_fields(entry)
         entry.update({
             "user_id": int(user.id),
             "first_name": getattr(user, "first_name", "") or "",
@@ -412,6 +440,7 @@ def grant_user_balance(user_id: int, amount: int) -> tuple[bool, int]:
         entry = users.get(str(user_id), {})
         if not isinstance(entry, dict):
             entry = {}
+        _ensure_data_quota_fields(entry)
         default_balance = 0 if is_owner(user_id) else REFERRAL_START_BALANCE
         current = max(0, int(entry.get("balance", default_balance)))
         entry.update({"user_id": user_id, "balance": current + amount})
@@ -423,6 +452,39 @@ def grant_user_balance(user_id: int, amount: int) -> tuple[bool, int]:
     except (TypeError, ValueError, OSError) as exc:
         log.error("No se pudo dar saldo user=%s (%s)", user_id, type(exc).__name__)
         return False, 0
+
+
+def purchase_data_package(user_id: int, package_key: str) -> tuple[bool, str, int, int]:
+    """Charges referral balance and adds a non-expiring data package atomically."""
+    package = DATA_PACKAGES.get(package_key)
+    if not package or user_id <= 0 or is_owner(user_id):
+        return False, "invalid", get_user_balance(user_id), get_remaining_quota(user_id)
+    try:
+        data = _load_json(USERS_DATA_FILE)
+        users = data.get("users", {})
+        if not isinstance(users, dict):
+            users = {}
+        entry = users.get(str(user_id), {})
+        if not isinstance(entry, dict):
+            entry = {}
+        _ensure_data_quota_fields(entry)
+        balance = max(0, int(entry.get("balance", REFERRAL_START_BALANCE)))
+        remaining = int(entry["data_quota_remaining_bytes"])
+        if balance < package["price"]:
+            return False, "insufficient", balance, remaining
+        entry["balance"] = balance - package["price"]
+        entry["data_quota_remaining_bytes"] = remaining + package["bytes"]
+        entry["data_quota_total_bytes"] += package["bytes"]
+        entry["data_quota_packages_purchased"] = int(entry.get("data_quota_packages_purchased", 0)) + 1
+        entry["last_data_package"] = package_key
+        entry["last_data_package_at"] = datetime.now(timezone.utc).isoformat()
+        users[str(user_id)] = entry
+        data["users"] = users
+        _save_json(USERS_DATA_FILE, data)
+        return True, "ok", entry["balance"], entry["data_quota_remaining_bytes"]
+    except (TypeError, ValueError, OSError) as exc:
+        log.error("No se pudo comprar paquete user=%s (%s)", user_id, type(exc).__name__)
+        return False, "storage_error", get_user_balance(user_id), get_remaining_quota(user_id)
 
 
 def referral_link(user_id: int, bot_username: str | None = None) -> str:
@@ -445,6 +507,7 @@ def apply_referral(user_id: int, referrer_id: int) -> bool:
         invited = users[str(user_id)]
         if not isinstance(invited, dict):
             return False
+        _ensure_data_quota_fields(invited)
         if invited.get("referred_by") or invited.get("referral_rewarded"):
             return False
         inviter = users.get(str(referrer_id))
@@ -489,6 +552,7 @@ def remember_pending_referral(user_id: int, referrer_id: int) -> bool:
                 "welcome_reward": REFERRAL_START_BALANCE,
             }
             users[str(user_id)] = invited
+        _ensure_data_quota_fields(invited)
         if invited.get("referred_by") or invited.get("referral_rewarded"):
             return False
         existing = invited.get("pending_referrer_id")
@@ -690,6 +754,24 @@ def add_daily_usage(user_id: int, file_bytes: int) -> None:
     if is_owner(user_id):
         return
     try:
+        users_data = _load_json(USERS_DATA_FILE)
+        users = users_data.get("users", {})
+        if not isinstance(users, dict):
+            users = {}
+        account = users.get(str(user_id), {})
+        if not isinstance(account, dict):
+            account = {}
+        _ensure_data_quota_fields(account)
+        remaining = int(account["data_quota_remaining_bytes"])
+        if file_bytes < 0 or file_bytes > remaining:
+            log.warning("No se pudo descontar cuota user=%s bytes=%s remaining=%s", user_id, file_bytes, remaining)
+            return
+        account["data_quota_remaining_bytes"] = remaining - int(file_bytes)
+        account["data_quota_used_bytes"] = int(account.get("data_quota_used_bytes", 0)) + int(file_bytes)
+        users[str(user_id)] = account
+        users_data["users"] = users
+        _save_json(USERS_DATA_FILE, users_data)
+
         data = _load_json(USAGE_DATA_FILE)
         today = _today_key()
         user_data = data.get(str(user_id), {})
@@ -769,73 +851,46 @@ def admin_leaderboard_text(limit: int = 20) -> str:
 def get_remaining_quota(user_id: int) -> int:
     if is_owner(user_id):
         return 10**18
-    plan = get_plan_info(get_user_plan(user_id))
-    used = get_daily_usage(user_id)
-    return max(0, plan["daily_bytes"] - used)
+    users = _load_json(USERS_DATA_FILE).get("users", {})
+    entry = users.get(str(user_id), {}) if isinstance(users, dict) else {}
+    if not isinstance(entry, dict):
+        return FREE_JOIN_QUOTA_BYTES
+    try:
+        return max(0, int(entry.get("data_quota_remaining_bytes", FREE_JOIN_QUOTA_BYTES)))
+    except (TypeError, ValueError):
+        return 0
 
 
-def next_quota_reset(user_id: int | None = None) -> datetime:
-    now = datetime.now(timezone.utc)
-    if user_id and quota_period_days(user_id) > 1:
-        data = _load_json(USAGE_DATA_FILE).get(str(user_id), {})
-        try:
-            started = datetime.fromisoformat(data["period_start"])
-            reset = started + timedelta(days=quota_period_days(user_id))
-            if reset > now:
-                return reset
-        except (KeyError, TypeError, ValueError):
-            pass
-    return (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+def data_quota_label(size: int) -> str:
+    size = max(0, int(size))
+    if size >= GIB:
+        return f"{size / GIB:.2f} GB"
+    return f"{size / MIB:.0f} MB"
 
 
-def quota_reset_countdown(user_id: int | None = None) -> str:
-    now = datetime.now(timezone.utc)
-    tomorrow = next_quota_reset(user_id)
-    seconds = max(0, int((tomorrow - now).total_seconds()))
-    hours, rem = divmod(seconds, 3600)
-    minutes, secs = divmod(rem, 60)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d} (UTC)"
+def reserve_data_quota(application: Application, user_id: int, task_id: str, file_bytes: int) -> tuple[bool, str]:
+    """Reserve quota before upload to prevent concurrent tasks from overspending it."""
+    if is_owner(user_id):
+        return True, ""
+    reservations = application.bot_data.setdefault("data_quota_reservations", {})
+    key = (int(user_id), str(task_id))
+    if key in reservations:
+        return True, ""
+    reserved = sum(
+        max(0, int(amount))
+        for (reserved_user, _), amount in reservations.items()
+        if reserved_user == int(user_id)
+    )
+    remaining = get_remaining_quota(user_id)
+    if file_bytes < 0 or file_bytes > max(0, remaining - reserved):
+        return False, quota_exhausted_text(user_id)
+    reservations[key] = int(file_bytes)
+    return True, ""
 
 
-def quota_reset_at_text(user_id: int | None = None) -> str:
-    return next_quota_reset(user_id).strftime("%d/%m/%Y a las %H:%M UTC")
-
-
-async def quota_reset_notifier(application: Application) -> None:
-    """Reinicia cuotas usadas y avisa una vez por día a los usuarios activos."""
-    observed_date = _today_key()
-    while True:
-        try:
-            today = _today_key()
-            if today != observed_date:
-                data = _load_json(USAGE_DATA_FILE)
-                for user_id in registered_user_ids():
-                    if quota_period_days(user_id) > 1:
-                        continue
-                    entry = data.get(str(user_id), {})
-                    if not isinstance(entry, dict) or entry.get("date") == today:
-                        continue
-                    if int(entry.get("bytes", 0) or 0) <= 0:
-                        continue
-                    if not reset_user_daily_usage(user_id):
-                        continue
-                    try:
-                        await application.bot.send_message(
-                            chat_id=user_id,
-                            text=card("✅ ᴄᴜᴏᴛᴀ ʀᴇɪɴɪᴄɪᴀᴅᴀ", [
-                                "Cuota reiniciada con éxito.",
-                                "Ya puedes volver a descargar y subir archivos.",
-                                f"⏳ Próximo reinicio: {quota_reset_at_text()}",
-                            ]),
-                        )
-                    except Exception:
-                        log.info("No se pudo avisar el reinicio a %s", user_id)
-                observed_date = today
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            log.warning("Monitor de reinicio de cuotas: %s", type(exc).__name__)
-        await asyncio.sleep(30)
+def release_data_quota_reservation(application: Application, user_id: int, task_id: str) -> None:
+    reservations = application.bot_data.get("data_quota_reservations", {})
+    reservations.pop((int(user_id), str(task_id)), None)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -980,7 +1035,7 @@ def clear_all_task_history() -> int:
 
 
 def reset_user_daily_usage(user_id: int) -> bool:
-    """Reinicia solo la cuota diaria y conserva el acumulado del ranking."""
+    """Reinicia solo la estadística diaria y conserva el acumulado del ranking."""
     try:
         data = _load_json(USAGE_DATA_FILE)
         entry = data.get(str(user_id), {})
@@ -992,7 +1047,7 @@ def reset_user_daily_usage(user_id: int) -> bool:
         _save_json(USAGE_DATA_FILE, data)
         return True
     except Exception as exc:
-        log.error("Error reiniciando cuota user=%s (%s)", user_id, type(exc).__name__)
+        log.error("Error reiniciando estadística user=%s (%s)", user_id, type(exc).__name__)
         return False
 
 
@@ -1003,11 +1058,14 @@ def admin_user_history_text(user_id: int) -> str:
     full_name = user_entry.get("full_name") or user_entry.get("first_name") or "Sin nombre"
     username = user_entry.get("username") or "sin @usuario"
     username = username if str(username).startswith("@") else f"@{username}"
+    quota_label = "∞ GB" if is_owner(user_id) else data_quota_label(get_remaining_quota(user_id))
     lines = [
         f"👤 {full_name}",
         f"{username} · ID: {user_id}",
         f"📦 Archivos: {len(entries)} · ☁️ Total: {get_total_usage(user_id) / GIB:.2f} GB",
-        f"📊 Cuota de hoy: {get_daily_usage(user_id) / GIB:.2f} GB",
+        f"📊 Uso de hoy (estadística): {get_daily_usage(user_id) / GIB:.2f} GB",
+        f"💾 Datos disponibles: {quota_label}",
+        f"💰 Saldo de referidos: {get_user_balance(user_id)}$",
         "",
     ]
     if not entries:
@@ -1024,7 +1082,7 @@ def admin_user_history_keyboard(user_id: int, entries: list[dict] | None = None)
             for index, _entry in enumerate(entries)]
     rows.extend([
         [btn("🧹 ʙᴏʀʀᴀʀ ʜɪꜱᴛᴏʀɪᴀʟ", callback_data=f"admin:histclear:{user_id}")],
-        [btn("🔄 ʀᴇɪɴɪᴄɪᴀʀ ᴄᴜᴏᴛᴀ", callback_data=f"admin:quotareset:{user_id}")],
+        [btn("📊 ʀᴇɪɴɪᴄɪᴀʀ ᴇꜱᴛᴀᴅíꜱᴛɪᴄᴀ", callback_data=f"admin:quotareset:{user_id}")],
         [btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")],
     ])
     return InlineKeyboardMarkup(rows)
@@ -1100,12 +1158,14 @@ def delete_task_history_by_task_id(user_id: int, task_id: str) -> bool:
         return False
 
 
-def quota_exhausted_text() -> str:
+def quota_exhausted_text(user_id: int | None = None) -> str:
+    remaining = get_remaining_quota(user_id) if user_id is not None else 0
     lines = [
-        "🚫 Se ha agotado tu cuota de uso.",
+        "🚫 Se agotó tu paquete de datos.",
         "",
-        f"La cuota se reinicia: {quota_reset_at_text()}",
-        "Espera al reinicio para volver a transferir archivos.",
+        f"Disponible: {data_quota_label(remaining)}",
+        "Compra otro paquete con tu saldo",
+        "de referidos para seguir transfiriendo.",
     ]
     box = card("⚠️ ᴄᴜᴏᴛᴀ ᴀɢᴏᴛᴀᴅᴀ", lines)
     return f"{box}\n\n{BOT_FOOTER}"
@@ -1113,7 +1173,8 @@ def quota_exhausted_text() -> str:
 
 def quota_exhausted_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [btn("📊 ᴠᴇʀ ᴍɪ ᴄᴜᴏᴛᴀ", callback_data="my_quota")],
+        [btn("💳 ᴄᴏᴍᴘʀᴀʀ ᴘᴀǫᴜᴇᴛᴇ", callback_data="balance"),
+         btn("📊 ᴍɪ ᴄᴜᴏᴛᴀ", callback_data="my_quota")],
         [btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")],
     ])
 
@@ -1122,16 +1183,13 @@ def check_quota(user_id: int, file_size: int) -> tuple[bool, str]:
     if is_owner(user_id):
         return True, ""
     try:
-        plan_key = get_user_plan(user_id)
-        plan = get_plan_info(plan_key)
-        used = get_daily_usage(user_id)
-        remaining = plan["daily_bytes"] - used
-        if file_size > remaining:
-            return False, quota_exhausted_text()
+        remaining = get_remaining_quota(user_id)
+        if file_size < 0 or file_size > remaining:
+            return False, quota_exhausted_text(user_id)
         return True, ""
     except Exception as e:
         log.error(f"Error en check_quota user={user_id}: {e}")
-        return True, ""
+        return False, quota_exhausted_text(user_id)
 
 
 def quota_lines(user_id: int) -> list[str]:
@@ -1144,26 +1202,26 @@ def quota_lines(user_id: int) -> list[str]:
             "⏳ Duración: Permanente",
         ]
     plan = get_plan_info(get_user_plan(user_id))
-    used = get_daily_usage(user_id)
-    remaining = max(0, plan["daily_bytes"] - used)
-    percent = min(100, int(used * 100 / plan["daily_bytes"])) if plan["daily_bytes"] > 0 else 0
+    users = _load_json(USERS_DATA_FILE).get("users", {})
+    account = users.get(str(user_id), {}) if isinstance(users, dict) else {}
+    account = account if isinstance(account, dict) else {}
+    _ensure_data_quota_fields(account)
+    remaining = get_remaining_quota(user_id)
+    total = max(remaining, int(account.get("data_quota_total_bytes", FREE_JOIN_QUOTA_BYTES) or FREE_JOIN_QUOTA_BYTES))
+    used = max(0, total - remaining)
+    percent = min(100, int(used * 100 / total)) if total > 0 else 0
     width = 12
     filled = round(width * percent / 100)
     bar = "▓" * filled + "░" * (width - filled)
+    plan_label = "Gratis + paquetes de datos" if plan["rank"] == 0 else f"{plan['badge']} {plan['display']} + datos prepagados"
     lines = [
-        f"🏷 Plan: {plan['badge']} {plan['display']}",
+        f"🏷 Plan: {plan_label}",
         f"📊 {bar} {percent}%",
-        f"📦 Gastado hoy: {used / GIB:.2f} GB",
-        f"💾 Libre: {remaining / GIB:.2f} GB",
-        f"🔄 Se reinicia en: {quota_reset_countdown(user_id)}",
-        f"🕛 Próximo reinicio: {quota_reset_at_text(user_id)}",
+        f"📦 Gastado en total: {data_quota_label(used)}",
+        f"💾 Cupo disponible: {data_quota_label(remaining)}",
+        "♾️ El paquete no vence; se consume al transferir.",
+        f"💰 Saldo de referidos: {get_user_balance(user_id)}$",
     ]
-    if plan["rank"] > 0 and plan["rank"] != 999:
-        exp_date, rem_days = get_plan_expiry_info(user_id)
-        if exp_date:
-            lines.append(f"📅 Vence: {exp_date}")
-        if rem_days is not None:
-            lines.append(f"⏳ Restan: {rem_days} días")
     return lines
 
 
@@ -1665,29 +1723,57 @@ def btn(text: str, **kwargs) -> InlineKeyboardButton:
 
 
 def main_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
-    balance_label = "💰 Saldo y referidos"
+    balance_label = "💰 Saldo y planes"
     if user_id is not None:
-        balance_label = f"💰 Saldo: {get_user_balance(user_id)}$ · Referidos"
+        balance_label = f"💰 Saldo: {get_user_balance(user_id)}$ · Planes"
     return InlineKeyboardMarkup([
-        [btn("📥 DESCARGAS", callback_data="downloads")],
-        [btn(balance_label, callback_data="balance")],
-        [btn("❓ Ayuda", callback_data="help:0"), btn("📜 Historial", callback_data="open_history")],
-        [btn("📋 Cola", callback_data="open_queue"), btn("💬 Soporte", callback_data="support")],
-        [btn("📊 Mi cuota", callback_data="my_quota"), btn("🏆 Top usuarios", callback_data="top:users")],
+        [btn("💡 ᴀᴘʀᴇɴᴅᴇ ʟᴀꜱ ꜰᴜɴᴄɪᴏɴᴇꜱ", callback_data="help:0")],
+        [btn("📄 ᴍᴇɴᴜ́ ᴄᴏᴍᴘʟᴇᴛᴏ", callback_data="all_menu"),
+         btn("⚙️ ᴀᴄᴄɪᴏɴᴇꜱ", callback_data="action_menu")],
+        [btn("❓ ᴍɪ ɪɴꜰᴏ", callback_data="my_info"), btn(balance_label, callback_data="balance")],
+        [btn("↗ ᴄᴏɴᴛᴀᴄᴛᴀʀ ᴀʟ ᴅᴜᴇñᴏ", callback_data="support")],
+    ])
+
+
+def all_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("📥 ᴅᴇꜱᴄᴀʀɢᴀꜱ", callback_data="downloads"),
+         btn("💰 ꜱᴀʟᴅᴏ ʏ ᴘʟᴀɴᴇꜱ", callback_data="balance")],
+        [btn("📊 ᴍɪ ᴄᴜᴏᴛᴀ", callback_data="my_quota"),
+         btn("📜 ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="open_history")],
+        [btn("❓ ᴀʏᴜᴅᴀ", callback_data="help:0"), btn("💬 ꜱᴏᴘᴏʀᴛᴇ", callback_data="support")],
+        [btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")],
+    ])
+
+
+def action_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("📋 ᴄᴏʟᴀ", callback_data="open_queue"),
+         btn("📜 ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="open_history")],
+        [btn("📊 ᴍɪ ᴄᴜᴏᴛᴀ", callback_data="my_quota"),
+         btn("🏆 ᴛᴏᴘ", callback_data="top:users")],
+        [btn("💰 ꜱᴀʟᴅᴏ ʏ ᴘᴀǫᴜᴇᴛᴇꜱ", callback_data="balance")],
+        [btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")],
     ])
 
 
 def plans_text(user_id: int, bot_username: str | None = None) -> str:
-    """Muestra el saldo de invitaciones y el enlace personal de referido."""
+    """Muestra el saldo, la cuota disponible, los paquetes y el enlace personal."""
     balance = get_user_balance(user_id)
     link = referral_link(user_id, bot_username)
+    quota_label = "∞ GB" if is_owner(user_id) else data_quota_label(get_remaining_quota(user_id))
     lines = [
         f"💰 Saldo de referidos: {balance}$",
+        f"📦 Datos disponibles: {quota_label}",
         "",
-        "🎁 Al registrarte recibes 5$.",
-        "👥 Invita a una persona:",
-        "tú recibes 5$ y ella recibe",
-        "su bienvenida de 5$.",
+        "🎁 Al unirte recibes 1 GB gratis y 5$.",
+        "👥 Cada referido válido te da 5$.",
+        "Los paquetes no vencen; se descuentan",
+        "al completar transferencias. Si se agotan,",
+        "compra otro con saldo de referidos.",
+        "",
+        "📋 Paquetes disponibles:",
+        *[f"• {item['name']} — {item['price']}$" for item in DATA_PACKAGES.values()],
         "",
         f"🔗 Tu enlace copiable:\n{{mono:{link}}}",
     ]
@@ -1697,12 +1783,48 @@ def plans_text(user_id: int, bot_username: str | None = None) -> str:
 def plans_keyboard(user_id: int, bot_username: str | None = None) -> InlineKeyboardMarkup:
     link = referral_link(user_id, bot_username)
     share_url = "https://t.me/share/url?url=" + quote(link, safe="") + "&text=" + quote(
-        "Únete a JK Down Bot y recibe 5$ de bienvenida.", safe=""
+        "Únete a TodusS3 Bot y recibe 1 GB gratis y 5$ de saldo.", safe=""
     )
-    return InlineKeyboardMarkup([
+    rows = [
         [btn("📤 ᴄᴏᴍᴘᴀʀᴛɪʀ ᴇʟ ʙᴏᴛ", url=share_url),
          btn("📋 ᴄᴏᴘɪᴀʀ ᴍɪ ᴇɴʟᴀᴄᴇ", copy_text=CopyTextButton(text=link))],
-        [btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")],
+    ]
+    if not is_owner(user_id):
+        packages = list(DATA_PACKAGES.items())
+        for index in range(0, len(packages), 2):
+            rows.append([
+                btn(
+                    f"🛒 {packages[offset][1]['name']} · {packages[offset][1]['price']}$",
+                    callback_data=f"data_package:select:{packages[offset][0]}",
+                )
+                for offset in range(index, min(index + 2, len(packages)))
+            ])
+    rows.append([btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")])
+    return InlineKeyboardMarkup(rows)
+
+
+def data_package_confirmation_text(user_id: int, package_key: str) -> str:
+    package = DATA_PACKAGES[package_key]
+    remaining = get_remaining_quota(user_id)
+    balance = get_user_balance(user_id)
+    lines = [
+        f"Paquete: {package['name']}",
+        f"Costo: {package['price']}$ de saldo",
+        f"Saldo actual: {balance}$",
+        f"Saldo después: {max(0, balance - package['price'])}$",
+        "",
+        "El cupo se sumará a tus datos",
+        "disponibles y no vence por tiempo.",
+        f"Ahora: {data_quota_label(remaining)}",
+        f"Después de comprar: {data_quota_label(remaining + package['bytes'])}",
+    ]
+    return f"{card('🛒 ᴄᴏɴꜰɪʀᴍᴀ ᴛᴜ ᴘᴀǫᴜᴇᴛᴇ', lines)}\n\n{BOT_FOOTER}"
+
+
+def data_package_confirmation_keyboard(package_key: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("✅ ᴄᴏᴍᴘʀᴀʀ ᴄᴏɴ ꜱᴀʟᴅᴏ", callback_data=f"data_package:confirm:{package_key}")],
+        [btn("⬅️ ᴠᴏʟᴠᴇʀ ᴀ ᴘᴀǫᴜᴇᴛᴇꜱ", callback_data="balance")],
     ])
 
 
@@ -1839,12 +1961,15 @@ def transfer_complete_text(filename: str = "", size: int = 0, parts: int = 1,
 # ═══════════════════════════════════════════════════════════════
 def admin_panel_text() -> str:
     lines = [
-        "Planes configurados:",
+        "Datos y saldo virtual:",
         "",
-        "🆓 Gratis: 5 GB/día",
-        "⭐ VIP Básico: 10 GB (250$)",
-        "💎 VIP Medio: 15 GB (500$)",
-        "👑 Premium: 20 GB (1000$)",
+        "🎁 Registro: 1 GB gratis y 5$.",
+        "👥 Referido válido: +5$.",
+        "500 MB: 5$ · 1 GB: 10$ · 2 GB: 20$",
+        "3 GB: 30$ · 5 GB: 50$ · 20 GB: 200$",
+        "Los datos se compran con saldo; no vencen.",
+        "Los roles VIP siguientes son manuales",
+        "y no sustituyen los paquetes de datos.",
         "",
         "Selecciona una acción:",
     ]
@@ -1856,9 +1981,9 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [btn("💰 ᴅᴀʀ ꜱᴀʟᴅᴏ ᴀ ᴜɴ ɪᴅ", callback_data="admin:balance")],
         [btn("🆓 ᴅᴀʀ ɢʀᴀᴛɪꜱ", callback_data="admin:plan:free")],
-        [btn("⭐ ᴅᴀʀ ᴠɪᴘ ʙáꜱɪᴄᴏ (250$)", callback_data="admin:plan:vip_basic")],
-        [btn("💎 ᴅᴀʀ ᴠɪᴘ ᴍᴇᴅɪᴏ (500$)", callback_data="admin:plan:vip_medium")],
-        [btn("👑 ᴅᴀʀ ᴘʀᴇᴍɪᴜᴍ (1000$)", callback_data="admin:plan:premium")],
+        [btn("⭐ ᴀꜱɪɢɴᴀʀ ᴠɪᴘ ʙáꜱɪᴄᴏ", callback_data="admin:plan:vip_basic")],
+        [btn("💎 ᴀꜱɪɢɴᴀʀ ᴠɪᴘ ᴍᴇᴅɪᴏ", callback_data="admin:plan:vip_medium")],
+        [btn("👑 ᴀꜱɪɢɴᴀʀ ᴘʀᴇᴍɪᴜᴍ", callback_data="admin:plan:premium")],
         [btn("🔍 ᴄᴏɴꜱᴜʟᴛᴀʀ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:check")],
         [btn("👥 ᴜꜱᴜᴀʀɪᴏꜱ ʀᴇɢɪꜱᴛʀᴀᴅᴏꜱ", callback_data="admin:users:0")],
         [btn("🗂️ ʜɪꜱᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:user_history")],
@@ -2173,6 +2298,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
         return
     temp_path = Path(job.temp_path) if job.temp_path else None
     progress_state = {"started": time.monotonic(), "last": 0.0, "last_bucket": -1}
+    quota_reserved = False
 
     async def report_download_progress(received, total):
         now = time.monotonic()
@@ -2271,7 +2397,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
             job.temp_path = None
             raise ValueError(f"Supera {_size_label(max_bytes, 0)}")
 
-        ok, err_msg = check_quota(job.user_id, size)
+        ok, err_msg = reserve_data_quota(application, job.user_id, job.task_id, size)
         if not ok:
             job.error = "Cuota agotada"
             job.set_state("error")
@@ -2280,6 +2406,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
             except Exception:
                 await _edit_task_status(job, err_msg)
             return
+        quota_reserved = not is_owner(job.user_id)
 
         if job.cancel_requested:
             job.set_state("paused")
@@ -2395,6 +2522,9 @@ async def process_task(job: TransferTask, application: Application) -> None:
             job.error = error_text[:200]
             job.set_state("error")
         await _edit_task_status(job, task_detail_text(job))
+    finally:
+        if quota_reserved:
+            release_data_quota_reservation(application, job.user_id, job.task_id)
 
 
 async def task_worker(application: Application) -> None:
@@ -2536,13 +2666,15 @@ def welcome_text(user_id: int, user_name: str, username: str | None = None) -> s
         return card_with_credit(BOT_NAME, lines, preserve_title=True)
     plan = get_plan_info(get_user_plan(user_id))
     remaining = get_remaining_quota(user_id)
+    plan_label = "Gratis · 1 GB de bienvenida" if plan["rank"] == 0 else f"{plan['badge']} {plan['display']}"
     lines = [
         f"👋 Hola, {short_name}",
         "",
         *identity_lines,
-        f"🏷 Plan: {plan['badge']} {plan['display']}",
+        f"🏷 Plan: {plan_label}",
         f"💰 Saldo: {get_user_balance(user_id)}$",
-        f"📦 Disponible: {remaining / GIB:.2f} GB",
+        f"📦 Datos disponibles: {data_quota_label(remaining)}",
+        "♾️ El cupo no vence; se consume al transferir.",
     ]
     if plan["rank"] > 0:
         _, rem_days = get_plan_expiry_info(user_id)
@@ -2720,7 +2852,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     referral_notice = ""
     if await complete_pending_referral(user.id, context):
-        referral_notice = "\n\n🎁 Recibiste 5$ de bienvenida por entrar con un enlace de invitación."
+        referral_notice = "\n\n🎁 Recibiste 1 GB gratis y 5$ de bienvenida por entrar con un enlace de invitación."
     await update.effective_message.reply_text(
         welcome_text(
             user.id,
@@ -2829,7 +2961,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if is_member:
             referral_notice = ""
             if await complete_pending_referral(user.id, context):
-                referral_notice = "\n\n🎁 Recibiste 5$ de bienvenida por entrar con un enlace de invitación."
+                referral_notice = "\n\n🎁 Recibiste 1 GB gratis y 5$ de bienvenida por entrar con un enlace de invitación."
             await query.message.edit_text(
                 welcome_text(
                     user.id,
@@ -2859,6 +2991,47 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             reply_markup=plans_keyboard(user.id, context.application.bot_data.get("bot_username")),
         )
         return
+    if query.data.startswith("data_package:select:"):
+        package_key = query.data.rsplit(":", 1)[-1]
+        if package_key not in DATA_PACKAGES or is_owner(user.id):
+            await query.answer(sc("Paquete no disponible"), show_alert=True)
+            return
+        await query.answer()
+        await query.message.edit_text(
+            data_package_confirmation_text(user.id, package_key),
+            reply_markup=data_package_confirmation_keyboard(package_key),
+        )
+        return
+    if query.data.startswith("data_package:confirm:"):
+        package_key = query.data.rsplit(":", 1)[-1]
+        if package_key not in DATA_PACKAGES or is_owner(user.id):
+            await query.answer(sc("Paquete no disponible"), show_alert=True)
+            return
+        ok, reason, new_balance, new_quota = purchase_data_package(user.id, package_key)
+        if not ok:
+            if reason == "insufficient":
+                await query.answer(sc("Saldo insuficiente"), show_alert=True)
+            else:
+                await query.answer(sc("No se pudo completar la compra"), show_alert=True)
+            await query.message.edit_text(
+                plans_text(user.id, context.application.bot_data.get("bot_username")),
+                reply_markup=plans_keyboard(user.id, context.application.bot_data.get("bot_username")),
+            )
+            return
+        await query.answer(sc("Paquete comprado"))
+        schedule_data_backup(context.application, "paquete de datos comprado")
+        package = DATA_PACKAGES[package_key]
+        await query.message.edit_text(
+            card("✅ ᴄᴏᴍᴘʀᴀ ᴄᴏᴍᴘʟᴇᴛᴀ", [
+                f"Paquete: {package['name']}",
+                f"Descontado: {package['price']}$",
+                f"Saldo actual: {new_balance}$",
+                f"Datos disponibles: {data_quota_label(new_quota)}",
+                "No vence por tiempo; se gasta al transferir.",
+            ]) + f"\n\n{BOT_FOOTER}",
+            reply_markup=plans_keyboard(user.id, context.application.bot_data.get("bot_username")),
+        )
+        return
     if not is_owner(user.id) and not await user_has_required_memberships(context.bot, user.id):
         await query.answer()
         channel_label, group_label = await required_chat_labels(context.bot)
@@ -2873,6 +3046,38 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.message.edit_text(
             public_leaderboard_text(),
             reply_markup=InlineKeyboardMarkup([[btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")]]),
+        )
+        return
+
+    if query.data == "all_menu":
+        await query.message.edit_text(
+            card("📄 ᴍᴇɴᴜ́ ᴄᴏᴍᴘʟᴇᴛᴏ", [
+                "Elige una función del bot:",
+                "subir archivos, revisar tu cuota,",
+                "consultar referidos o ver ayuda.",
+            ]),
+            reply_markup=all_menu_keyboard(),
+        )
+        return
+
+    if query.data == "action_menu":
+        await query.message.edit_text(
+            card("⚙️ ᴀᴄᴄɪᴏɴᴇꜱ", [
+                "Gestiona tus transferencias,",
+                "consulta tu saldo y revisa los datos.",
+            ]),
+            reply_markup=action_menu_keyboard(),
+        )
+        return
+
+    if query.data == "my_info":
+        await query.message.edit_text(
+            welcome_text(
+                user.id,
+                getattr(user, "full_name", "") or getattr(user, "first_name", ""),
+                getattr(user, "username", None),
+            ),
+            reply_markup=main_keyboard(user.id),
         )
         return
 
@@ -3591,10 +3796,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if query.data == "support":
         owner_id = parse_owner_id()
         if not owner_id:
-            await query.message.reply_text(card("💬 ꜱᴏᴘᴏʀᴛᴇ", ["No disponible actualmente."]))
+            await query.message.edit_text(
+                card("💬 ꜱᴏᴘᴏʀᴛᴇ", ["No disponible actualmente."]),
+                reply_markup=main_keyboard(user.id),
+            )
             return
         context.user_data["awaiting_support"] = True
-        await query.message.reply_text(
+        await query.message.edit_text(
             card("💬 ꜱᴏᴘᴏʀᴛᴇ", [
                 "Escribe tu mensaje y",
                 "se lo enviaré directo",
@@ -4017,7 +4225,6 @@ async def post_init(application: Application) -> None:
 
     identity = await application.bot.get_me()
     application.bot_data["bot_username"] = identity.username or os.getenv("BOT_USERNAME", "jk_down_bot")
-    application.bot_data["quota_reset_task"] = asyncio.create_task(quota_reset_notifier(application))
     await asyncio.to_thread(expire_cloud_files)
     application.bot_data["cloud_expiration_task"] = asyncio.create_task(cloud_expiration_monitor(application))
     log.info("Bot activo: @%s", identity.username or "sin_username")
@@ -4113,10 +4320,6 @@ async def post_init(application: Application) -> None:
 
 
 async def post_shutdown(application: Application) -> None:
-    quota_task = application.bot_data.get("quota_reset_task")
-    if quota_task:
-        quota_task.cancel()
-        await asyncio.gather(quota_task, return_exceptions=True)
     expiration_task = application.bot_data.get("cloud_expiration_task")
     if expiration_task:
         expiration_task.cancel()
