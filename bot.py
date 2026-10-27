@@ -2680,7 +2680,8 @@ async def process_task(job: TransferTask, application: Application) -> None:
             pass
 
     try:
-        max_bytes = env_int("MAX_FILE_SIZE_MIB", 4096) * MIB
+        max_mib = env_int("MAX_FILE_SIZE_MIB", 0, minimum=0)
+        max_bytes = max_mib * MIB if max_mib else None
         if temp_path is None or not temp_path.exists() or not job.download_complete:
             job.set_state("downloading")
             await _edit_task_status(job, card("📥 ᴅᴇꜱᴄᴀʀɢᴀɴᴅᴏ", [
@@ -2748,7 +2749,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
 
         validate_downloaded_file(temp_path, filename)
 
-        if size > max_bytes and not is_owner(job.user_id):
+        if max_bytes and size > max_bytes and not is_owner(job.user_id):
             temp_path.unlink(missing_ok=True)
             if temp_path.parent.name.startswith("tg-platform-"):
                 shutil.rmtree(temp_path.parent, ignore_errors=True)
@@ -2898,9 +2899,13 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 f"📄 {(filename or 'archivo')[:42]}",
                 f"📦 Tamaño: {_size_label(size)}",
                 f"📱 Número: {get_user_todus_number(job.user_id)}",
+                f"🧩 Partes: {len(job.part_urls)}",
                 "",
                 "Ábrelo en ToDus y púlsalo",
                 "para descargarlo (tráfico nacional).",
+                "Si ves .part001, .part002, etc.,",
+                "descarga todas y únelas con ZArchiver",
+                "usando la opción Unir/Combinar partes.",
             ]))
         else:
             await job.status_message.edit_text(
@@ -4842,8 +4847,9 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             break
     if not size_hint and getattr(message, "photo", None):
         size_hint = getattr(message.photo[-1], "file_size", None)
-    max_size = env_int("MAX_FILE_SIZE_MIB", 4096) * MIB
-    if size_hint and size_hint > max_size and not is_owner(user.id):
+    max_mib = env_int("MAX_FILE_SIZE_MIB", 0, minimum=0)
+    max_size = max_mib * MIB if max_mib else None
+    if max_size and size_hint and size_hint > max_size and not is_owner(user.id):
         await message.reply_text(sc(f"El archivo supera el límite de {_size_label(max_size, 0)}."))
         return
     if size_hint and not is_owner(user.id):

@@ -55,7 +55,7 @@ El bot restaura primero la copia fijada y luego inicia MTProto. Guarda automáti
 - `TELEGRAM_BACKUP_INTERVAL_SECONDS`: intervalo automático; predeterminado 300 segundos, mínimo 30.
 - `BOT_DATA_DIR`: ruta de datos persistentes; usa `/data` y monta un volumen en esa ruta.
 - `TELEGRAM_API_ID` y `TELEGRAM_API_HASH`: opcionales; necesarios para que MTProto descargue reenvíos grandes de Telegram. Se obtienen en my.telegram.org y no sustituyen el token del bot.
-- `MAX_FILE_SIZE_MIB`: máximo de entrada; predeterminado 4096 MiB.
+- `MAX_FILE_SIZE_MIB`: máximo de entrada; `0` significa sin límite artificial. El modo ToDus divide los archivos grandes en partes de hasta 950 MiB.
 - `MAX_PART_SIZE_MIB`: tamaño de cada parte; predeterminado 1900 MiB. Los archivos mayores se dividen en partes con enlaces separados.
 - `MAX_TRANSFER_HOURS`: tiempo máximo para una transferencia; predeterminado 24 horas.
 
@@ -69,7 +69,7 @@ Los paquetes se acumulan, no vencen por tiempo y solo se descuentan cuando termi
 
 La Bot API pública solo permite descargar archivos de hasta 20 MiB con `getFile`; para reenvíos mayores se necesita MTProto. Telegram limita el tamaño de los archivos adjuntos a 2 GB, o 4 GB con Premium ([FAQ de Telegram](https://telegram.org/faq#q-what-can-i-send-my-friends), [Bot API](https://core.telegram.org/bots/api#file)). Por eso, un adjunto de Telegram de 100 GB no es posible.
 
-El máximo predeterminado de este bot es 4096 MiB. Subirlo a 100 GB no basta para procesar un enlace de ese tamaño: el flujo actual guarda el archivo temporal y crea copias por partes, por lo que necesita cerca de 200 GB de espacio libre durante el procesamiento. No aumentes `MAX_FILE_SIZE_MIB` a 100 GB hasta contar con almacenamiento suficiente y comprobar el límite del proveedor.
+Con `MAX_FILE_SIZE_MIB=0` no hay un límite artificial de entrada. Esto no significa tamaño infinito: el archivo debe poder descargarse desde el origen y el servicio necesita espacio temporal suficiente para guardarlo y crear sus partes. En ToDus las partes se envían como archivos separados de hasta 950 MiB; el usuario debe unirlas en el teléfono con una herramienta de archivos como ZArchiver.
 
 ## Despliegue en Railway
 
