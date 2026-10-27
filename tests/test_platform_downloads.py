@@ -123,7 +123,7 @@ class PlatformDownloadTests(unittest.TestCase):
         options = ydl_class.call_args.args[0]
         self.assertNotIn("cookiefile", options)
         self.assertNotIn("http_headers", options)
-        self.assertEqual(ydl.extract_info.call_count, 4)
+        self.assertEqual(ydl.extract_info.call_count, 6)
 
     def test_short_youtube_link_retries_403_with_web_client(self):
         with tempfile.TemporaryDirectory() as folder:

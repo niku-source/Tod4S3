@@ -14,6 +14,7 @@ PLATFORM_HOST_HINTS = {
     "facebook.com", "fb.watch", "youtube.com", "youtu.be", "instagram.com",
     "tiktok.com", "twitter.com", "x.com", "reddit.com", "twitch.tv",
 }
+YOUTUBE_PUBLIC_CLIENTS = ("mweb", "android_vr", "android", "tv_embedded", "mediaconnect")
 
 
 @lru_cache(maxsize=512)
@@ -162,7 +163,7 @@ def download_platform_video(
             "403" in lowered or any(marker in lowered for marker in restricted_markers)
         )
         if should_retry_youtube:
-            for client in ("mweb", "android_vr", "android"):
+            for client in YOUTUBE_PUBLIC_CLIENTS:
                 retry_options = dict(base_options)
                 retry_options["extractor_args"] = {"youtube": {"player_client": [client]}}
                 try:
