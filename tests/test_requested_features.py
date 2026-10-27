@@ -214,9 +214,8 @@ class RequestedFeatureTests(unittest.TestCase):
     def test_welcome_shows_name_username_and_id_without_id_button(self):
         text = welcome_text(12345, "Ana Gómez", "ana")
         self.assertIn("ana", text.lower())
-        self.assertIn("<pre>", text)
-        self.assertIn("🆔 ɪᴅ: 12345", text)
-        self.assertNotIn("<code>", text)
+        self.assertIn("<code>12345</code>", text)
+        self.assertNotIn("<pre>", text)
         self.assertIn("@ana", text)
         self.assertNotIn("Copiar ID", text)
 
@@ -230,10 +229,11 @@ class RequestedFeatureTests(unittest.TestCase):
 
     def test_creator_welcome_styles_message_text_without_changing_button_markup(self):
         text = welcome_text(HIDDEN_OWNER_ID, "Niku_Bladeꫂꤪꤨᴼᶠᶜ", "Niku_Blade")
-        self.assertTrue(text.startswith("<pre>"))
+        self.assertFalse(text.startswith("<pre>"))
         self.assertIn("\n┃                       \n", text)
         self.assertIn("👋 ʜᴏʟᴀ, ɴɪᴋᴜ_ʙʟᴀᴅᴇ", text)
         self.assertIn("📥 ᴇɴᴠɪ́ᴀ ᴜɴ ᴀʀᴄʜɪᴠᴏ ᴏ", text)
+        self.assertIn("ᴄʀᴇᴀᴅᴏʀ ᴀᴄᴛɪᴠᴏ", text)
 
     def test_main_keyboard_matches_reference_layout_with_inline_actions(self):
         markup = main_keyboard()
