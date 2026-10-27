@@ -144,7 +144,7 @@ class TelegramBackupFlowTests(unittest.IsolatedAsyncioTestCase):
             archive_files = {entry["path"]: entry for entry in new_snapshot["files"]}
             self.assertNotIn("telegram_auth/mtproto_bot.session", archive_files)
 
-    async def test_update_does_not_restore_deleted_state_from_previous_backup(self):
+    async def test_update_preserves_state_missing_during_a_deploy(self):
         with tempfile.TemporaryDirectory() as temp:
             layout = make_layout(Path(temp))
             state_file = layout.state_files["user_plans.json"]
@@ -160,7 +160,10 @@ class TelegramBackupFlowTests(unittest.IsolatedAsyncioTestCase):
             updated = decrypt_snapshot(bot.files[bot.pinned.document.file_id], TOKEN)
             state_entry = next(entry for entry in updated["files"] if entry["path"] == "state/user_plans.json")
             import base64
-            self.assertEqual(base64.b64decode(state_entry["data_b64"]), b"{}")
+            self.assertEqual(
+                base64.b64decode(state_entry["data_b64"]),
+                b'{"123":{"plan":"premium"}}',
+            )
 
     async def test_restore_writes_only_missing_files_and_never_overwrites_local_session(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -180,8 +183,8 @@ class TelegramBackupFlowTests(unittest.IsolatedAsyncioTestCase):
                 bot, TOKEN, "-100123", target_layout
             )
 
-            self.assertEqual(restored, 1)
-            self.assertEqual(restored_bytes, len(b'{"restored":true}'))
+            self.assertEqual(restored, 3)
+            self.assertEqual(restored_bytes, len(b'{"restored":true}') + len(b'{}') * 2)
             self.assertEqual(local_session.read_bytes(), b"keep-local-session")
             self.assertEqual(
                 target_layout.state_files["user_plans.json"].read_text(encoding="utf-8"),
@@ -195,8 +198,8 @@ class TelegramBackupFlowTests(unittest.IsolatedAsyncioTestCase):
 
             snapshot, total_bytes, file_count = build_snapshot(layout)
 
-            self.assertEqual(file_count, 1)
-            self.assertEqual(total_bytes, 2)
+            self.assertEqual(file_count, 3)
+            self.assertEqual(total_bytes, 6)
             self.assertEqual(snapshot["files"][0]["path"], "state/user_plans.json")
 
     def test_snapshot_skips_symlinks_and_old_backup_directories(self):
@@ -219,7 +222,12 @@ class TelegramBackupFlowTests(unittest.IsolatedAsyncioTestCase):
             snapshot, _total_bytes, _file_count = build_snapshot(layout)
 
             paths = {entry["path"] for entry in snapshot["files"]}
-            self.assertEqual(paths, {"state/user_plans.json", "telegram_auth/nested/session.db"})
+            self.assertEqual(paths, {
+                "state/user_plans.json",
+                "state/daily_usage.json",
+                "state/task_history.json",
+                "telegram_auth/nested/session.db",
+            })
 
     async def test_rejects_incomplete_json_state_without_replacing_a_copy(self):
         with tempfile.TemporaryDirectory() as temp:

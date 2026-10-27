@@ -3021,6 +3021,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if match:
             remember_pending_referral(user.id, int(match.group(1)))
     is_new_user = register_user(user)
+    if is_new_user:
+        schedule_data_backup(context.application, "registro de usuario nuevo")
     if channel_prompt_completed(user.id):
         referral_notice = ""
         if await complete_pending_referral(user.id, context):

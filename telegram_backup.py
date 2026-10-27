@@ -361,18 +361,18 @@ def build_snapshot(
             )
         entries.append(_entry(archive_path, "auth", content))
 
-    if not entries and missing_state_keys:
-        # Solo un contenedor completamente nuevo necesita estados vacíos.
-        # Si ya existe una copia anterior, el bloque de fusión de arriba la
-        # conserva sin reemplazar datos por `{}`.
-        for key in missing_state_keys:
-            content = b"{}"
-            total_bytes += len(content)
-            if total_bytes > max_total_bytes:
-                raise BackupSizeError(
-                    f"Los archivos de estado y sesión suman {total_bytes} bytes; el límite es {max_total_bytes} bytes."
-                )
-            entries.append(_entry(f"state/{key}", "state", content))
+    # Un archivo de estado ausente puede ocurrir durante un deploy o una
+    # restauración parcial. Nunca debe hacer que la nueva copia elimine esos
+    # datos de la copia anterior. Los borrados intencionales sí se conservan,
+    # porque el archivo existe y contiene {} o su estado actualizado.
+    for key in missing_state_keys:
+        content = _previous_state_bytes(previous_snapshot, key) or b"{}"
+        total_bytes += len(content)
+        if total_bytes > max_total_bytes:
+            raise BackupSizeError(
+                f"Los archivos de estado y sesión suman {total_bytes} bytes; el límite es {max_total_bytes} bytes."
+            )
+        entries.append(_entry(f"state/{key}", "state", content))
     if not entries:
         raise BackupError("La instantánea no contiene estado ni archivos de sesión; se conserva la copia anterior.")
 
