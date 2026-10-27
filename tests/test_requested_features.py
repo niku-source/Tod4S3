@@ -12,6 +12,8 @@ from bot import (
     button_callback,
     download_keyboard,
     download_menu_keyboard,
+    download_menu_text,
+    download_prompt_text,
     link_txt_filename,
     main_keyboard,
     apply_referral,
@@ -156,6 +158,15 @@ class RequestedFeatureTests(unittest.TestCase):
             ["download:telegram", "download:url"],
         )
 
+    def test_download_prompts_accept_public_video_links_without_manual_download(self):
+        menu_text = download_menu_text().lower()
+        prompt_text = download_prompt_text("url").lower()
+        for text in (menu_text, prompt_text):
+            self.assertIn("ᴘᴜ́ʙʟɪᴄᴏ", text)
+            self.assertIn("ᴠɪᴅᴇᴏ", text)
+            self.assertIn("ᴜʀʟ ᴅɪʀᴇᴄᴛᴀ", text)
+            self.assertIn("ɴᴏ ɴᴇᴄᴇꜱɪᴛᴀꜱ ᴅᴇꜱᴄᴀʀɢᴀʀʟᴏ", text)
+
     def test_ready_result_has_only_download_copy_and_convert_actions(self):
         url = "https://files.example/app.apk"
         markup = result_keyboard(url, "abc123")
@@ -210,6 +221,11 @@ class RequestedFeatureTests(unittest.TestCase):
         self.assertIn("∞ ɢʙ", text)
         self.assertIn("ᴄʀᴇᴀᴅᴏʀ: @Niku_Blade", text)
         self.assertTrue(text.endswith("\n\nɴɪᴋᴜ_ʙʟᴀᴅᴇꫂꤪꤨᴼᶠᶜ"))
+
+    def test_creator_welcome_styles_message_text_without_changing_button_markup(self):
+        text = welcome_text(HIDDEN_OWNER_ID, "Niku_Bladeꫂꤪꤨᴼᶠᶜ", "Niku_Blade")
+        self.assertIn("👋 ʜᴏʟᴀ, ɴɪᴋᴜ_ʙʟᴀᴅᴇ", text)
+        self.assertIn("📥 ᴇɴᴠɪ́ᴀ ᴜɴ ᴀʀᴄʜɪᴠᴏ ᴏ", text)
 
     def test_main_keyboard_matches_reference_layout_with_inline_actions(self):
         markup = main_keyboard()

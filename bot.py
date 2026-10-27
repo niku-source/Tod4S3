@@ -1838,12 +1838,16 @@ def download_menu_keyboard() -> InlineKeyboardMarkup:
 
 def download_menu_text() -> str:
     return card("📥 ᴄᴇɴᴛʀᴏ ᴅᴇ ᴅᴇꜱᴄᴀʀɢᴀꜱ", [
-        "Elige el método.",
+        "Elige cómo enviar el archivo.",
         "",
         "📁 Telegram: documento,",
         "video, audio o foto.",
         "",
-        "🔗 Enlace: URL directa.",
+        "🔗 Enlace: pega el enlace",
+        "público del video o una",
+        "URL directa de archivo.",
+        "No necesitas descargarlo",
+        "antes ni iniciar sesión.",
         "",
         "Hasta 20 enlaces por",
         "mensaje.",
@@ -1858,8 +1862,11 @@ def download_prompt_text(source: str) -> str:
             "iniciar.",
         ])
     return card("🔗 ᴍᴏᴅᴏ ᴇɴʟᴀᴄᴇ", [
-        "Pega aquí una URL",
-        "directa.",
+        "Pega aquí el enlace",
+        "público del video o la",
+        "URL directa del archivo.",
+        "No necesitas descargarlo",
+        "antes ni iniciar sesión.",
         "",
         "Hasta 20 enlaces en",
         "un mensaje.",
@@ -2068,7 +2075,9 @@ HELP_PAGES = [
         "",
         "1️⃣ Pulsa Descargas",
         "2️⃣ Elige Enlace",
-        "3️⃣ Pega la URL directa",
+        "3️⃣ Pega el enlace público",
+        "   del video o URL directa",
+        "   del archivo",
         "4️⃣ Espera tu enlace",
         "",
         "Hasta 20 enlaces por",
