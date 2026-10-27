@@ -333,6 +333,7 @@ USAGE_DATA_FILE = os.getenv("USAGE_DATA_FILE", str(DATA_DIR / "daily_usage.json"
 HISTORY_DATA_FILE = os.getenv("HISTORY_DATA_FILE", str(DATA_DIR / "task_history.json"))
 USERS_DATA_FILE = os.getenv("USERS_DATA_FILE", str(DATA_DIR / "users.json"))
 ADMIN_AUDIT_FILE = os.getenv("ADMIN_AUDIT_FILE", str(DATA_DIR / "admin_audit.json"))
+TODUS_USERS_FILE = os.getenv("TODUS_USERS_FILE", str(DATA_DIR / "todus_users.json"))
 # Telegram Bot API no mantiene una sesión local. La sesión MTProto opcional del proyecto
 # sí puede persistirse aquí para incluirla, cifrada, en la copia de seguridad.
 TELEGRAM_AUTH_DIR = DATA_DIR / "telegram_auth"
@@ -348,6 +349,7 @@ def telegram_backup_layout() -> BackupLayout:
             "task_history.json": HISTORY_DATA_FILE,
             "users.json": USERS_DATA_FILE,
             "admin_audit.json": ADMIN_AUDIT_FILE,
+            "todus_users.json": TODUS_USERS_FILE,
         },
     )
 
@@ -2414,7 +2416,6 @@ async def send_document_to_chat(job: TransferTask, bot_obj, part_path: Path,
 # ═══════════════════════════════════════════════════════════════
 #  ENTREGA POR TODUS (cuenta del bot → chat ToDus del usuario)
 # ═══════════════════════════════════════════════════════════════
-TODUS_USERS_FILE = os.getenv("TODUS_USERS_FILE", str(DATA_DIR / "todus_users.json"))
 TODUS_BOT_PHONE = os.getenv("TODUS_PHONE", "").strip()
 TODUS_BOT_PASSWORD = os.getenv("TODUS_PASSWORD", "").strip()
 _todus_client = None
