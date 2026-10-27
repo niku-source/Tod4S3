@@ -125,6 +125,35 @@ class PlatformDownloadTests(unittest.TestCase):
         self.assertNotIn("http_headers", options)
         ydl.extract_info.assert_called_once()
 
+    def test_short_youtube_link_retries_403_with_web_client(self):
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "platform-download"
+            first = MagicMock()
+            first.extract_info.side_effect = DownloadError("unable to download video data: HTTP Error 403: Forbidden")
+            second = MagicMock()
+
+            def successful_extract(_url, download=True):
+                self.assertTrue(download)
+                (output / "clip.mp4").write_bytes(b"video")
+
+            second.extract_info.side_effect = successful_extract
+            ydl_class = MagicMock()
+            ydl_class.return_value.__enter__.side_effect = [first, second]
+
+            with patch("platform_downloads._check_public_dns_target"), patch.object(
+                yt_dlp, "YoutubeDL", ydl_class
+            ):
+                path, name, size = download_platform_video(
+                    "https://youtu.be/dQw4w9WgXcQ",
+                    output,
+                    max_bytes=1024,
+                )
+
+        self.assertEqual((path.name, name, size), ("clip.mp4", "clip.mp4", 5))
+        self.assertEqual(ydl_class.call_count, 2)
+        retry_options = ydl_class.call_args.args[0]
+        self.assertEqual(retry_options["extractor_args"], {"youtube": {"player_client": ["web"]}})
+
     def test_download_aborts_when_progress_exceeds_limit(self):
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / "platform-download"

@@ -163,7 +163,9 @@ def download_platform_video(
         # public video is available. Re-extract once with the web client so a
         # fresh signed URL is generated. This does not load cookies or bypass
         # private/login/DRM restrictions.
-        if "403" in lowered and "youtube" in (urlsplit(url).hostname or "").lower():
+        host = (urlsplit(url).hostname or "").rstrip(".").lower()
+        is_youtube_host = host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
+        if "403" in lowered and is_youtube_host:
             retry_options = dict(base_options)
             retry_options["extractor_args"] = {"youtube": {"player_client": ["web"]}}
             retry_options["http_headers"] = {
