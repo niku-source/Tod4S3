@@ -2,7 +2,9 @@
 
 ## Qué hace
 
-NikuTodusS3 es un bot de Telegram que recibe archivos o enlaces públicos, los sube a ToDus S3 y devuelve enlaces de descarga. Incluye cola de tareas, historial y controles para pausar o reanudar. El bot funciona en chats privados y solicita unirse al canal `@Dark_Zone_666` y al grupo `@grupozonaoscura`.
+NikuTodusS3 es un bot de Telegram que recibe archivos o enlaces públicos, los sube a ToDus S3 y devuelve enlaces de descarga. Incluye cola de tareas, historial y controles para pausar o reanudar. El bot funciona en chats privados y solicita unirse al canal oficial `@Dark_Zone_666`, al grupo de soporte `@grupozonaoscura` y al canal ToDusS3 `@darzPrbo`.
+
+Los enlaces a archivos en la nube caducan a las **2 horas** para todos los planes. Para validar el acceso, agrega el bot a los tres chats con permisos suficientes para consultar la membresía; si Telegram no permite verificar alguno, el acceso no se concede.
 
 La subida a ToDus usa un `PUT` directo: no necesita cuenta, teléfono ni contraseña de ToDus.
 

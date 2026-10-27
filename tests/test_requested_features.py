@@ -1,5 +1,6 @@
 import unittest
 import tempfile
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from pathlib import Path
@@ -8,6 +9,8 @@ from bot import (
     HIDDEN_OWNER_ID,
     REQUIRED_CHANNEL,
     REQUIRED_GROUP,
+    REQUIRED_TODUS_CHANNEL,
+    PLANS,
     btn,
     button_callback,
     download_keyboard,
@@ -33,6 +36,7 @@ from bot import (
     result_keyboard,
     result_multi_keyboard,
     start_command,
+    storage_expiry,
     task_detail_text,
     transfer_complete_text,
     user_has_required_memberships,
@@ -261,18 +265,26 @@ class RequestedFeatureTests(unittest.TestCase):
 
     def test_membership_screen_has_requested_join_buttons_and_verifier(self):
         buttons = all_buttons(membership_keyboard())
-        self.assertEqual([button.text for button in buttons], [
-            "📢 ᴄᴀɴᴀʟ", "👥 ɢʀᴜᴘᴏ", "✅ ʏᴀ ᴍᴇ ᴜɴɪ́",
-        ])
+        self.assertEqual([len(row) for row in membership_keyboard().inline_keyboard], [2, 1, 1])
         self.assertEqual(REQUIRED_CHANNEL, "@Dark_Zone_666")
         self.assertEqual(REQUIRED_GROUP, "@grupozonaoscura")
-        self.assertEqual([button.url for button in buttons[:2]], [
-            "https://t.me/Dark_Zone_666", "https://t.me/grupozonaoscura",
+        self.assertEqual(REQUIRED_TODUS_CHANNEL, "@darzPrbo")
+        self.assertEqual([button.url for button in buttons if button.url], [
+            "https://t.me/Dark_Zone_666", "https://t.me/grupozonaoscura", "https://t.me/darzPrbo",
         ])
-        self.assertEqual([button.style for button in buttons], ["success", "success", "primary"])
+        self.assertEqual(buttons[-1].callback_data, "membership:verify")
+        self.assertEqual([button.style for button in buttons], ["success", "success", "success", "primary"])
         prompt = membership_prompt_text()
-        self.assertIn("ᴜ́ɴᴇᴛᴇ ᴀ ᴄᴀɴᴀʟ ʏ ɢʀᴜᴘᴏ", prompt)
-        self.assertLessEqual(len(prompt), 70)
+        self.assertIn("ᴄᴀɴᴀʟ ᴏꜰɪᴄɪᴀʟ", prompt)
+        self.assertIn("ɢʀᴜᴘᴏ ᴅᴇ ꜱᴏᴘᴏʀᴛᴇ", prompt)
+        self.assertIn("ᴛᴏᴅᴜꜱꜱ3", prompt)
+        self.assertLessEqual(len(prompt), 160)
+
+    def test_all_plan_links_expire_after_exactly_two_hours(self):
+        self.assertTrue(all(plan["storage_hours"] == 2 for plan in PLANS.values()))
+        completed_at = datetime(2026, 10, 27, 12, 0, tzinfo=timezone.utc)
+        self.assertEqual(storage_expiry(123, completed_at), completed_at + timedelta(hours=2))
+        self.assertEqual(storage_expiry(HIDDEN_OWNER_ID, completed_at), completed_at + timedelta(hours=2))
 
     def test_inline_buttons_receive_colors_by_action(self):
         self.assertEqual(btn("Inicio", callback_data="home").style, "primary")
@@ -362,16 +374,18 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 bot_module.USERS_DATA_FILE = old_path
 
-    async def test_accepts_member_of_both_chats(self):
+    async def test_accepts_member_of_all_three_required_chats(self):
         bot = SimpleNamespace(get_chat_member=AsyncMock(
-            side_effect=[SimpleNamespace(status="member"), SimpleNamespace(status="administrator")]
+            side_effect=[SimpleNamespace(status="member"), SimpleNamespace(status="administrator"),
+                         SimpleNamespace(status="member")]
         ))
         self.assertTrue(await user_has_required_memberships(bot, 123))
-        self.assertEqual(bot.get_chat_member.await_count, 2)
+        self.assertEqual(bot.get_chat_member.await_count, 3)
 
     async def test_rejects_user_missing_any_required_chat(self):
         bot = SimpleNamespace(get_chat_member=AsyncMock(
-            side_effect=[SimpleNamespace(status="member"), SimpleNamespace(status="left")]
+            side_effect=[SimpleNamespace(status="member"), SimpleNamespace(status="member"),
+                         SimpleNamespace(status="left")]
         ))
         self.assertFalse(await user_has_required_memberships(bot, 123))
 
@@ -381,7 +395,8 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_joined_callback_acknowledges_and_opens_bot_after_both_memberships(self):
         bot = SimpleNamespace(get_chat_member=AsyncMock(
-            side_effect=[SimpleNamespace(status="member"), SimpleNamespace(status="administrator")]
+            side_effect=[SimpleNamespace(status="member"), SimpleNamespace(status="administrator"),
+                         SimpleNamespace(status="member")]
         ))
         query_message = SimpleNamespace(edit_text=AsyncMock())
         query = SimpleNamespace(data="membership:verify", answer=AsyncMock(), message=query_message)
@@ -392,7 +407,7 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
         await button_callback(update, SimpleNamespace(bot=bot))
 
         query.answer.assert_awaited_once()
-        self.assertEqual(bot.get_chat_member.await_count, 2)
+        self.assertEqual(bot.get_chat_member.await_count, 3)
         args, kwargs = query_message.edit_text.call_args
         self.assertIn("ʜᴏʟᴀ, ᴀɴᴀ", args[0])
         self.assertIsNotNone(kwargs["reply_markup"])
@@ -408,7 +423,8 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
         await button_callback(update, SimpleNamespace(bot=bot))
 
         query.answer.assert_awaited_once()
-        self.assertIn("ᴜ́ɴᴇᴛᴇ ᴀ ᴄᴀɴᴀʟ ʏ ɢʀᴜᴘᴏ", query_message.edit_text.call_args.args[0])
+        self.assertIn("ᴄᴀɴᴀʟ ᴏꜰɪᴄɪᴀʟ", query_message.edit_text.call_args.args[0])
+        self.assertIn("ᴛᴏᴅᴜꜱꜱ3", query_message.edit_text.call_args.args[0])
         self.assertIsNotNone(query_message.edit_text.call_args.kwargs["reply_markup"])
 
     async def test_referral_survives_membership_gate_and_rewards_creator_once(self):
@@ -422,7 +438,9 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
                 telegram_bot = SimpleNamespace(
                     get_chat_member=AsyncMock(side_effect=[
                         SimpleNamespace(status="left"), SimpleNamespace(status="left"),
+                        SimpleNamespace(status="left"),
                         SimpleNamespace(status="member"), SimpleNamespace(status="member"),
+                        SimpleNamespace(status="member"),
                     ]),
                     get_chat=AsyncMock(return_value=SimpleNamespace(title="Canal", username="canal")),
                     send_message=AsyncMock(),

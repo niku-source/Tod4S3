@@ -85,10 +85,13 @@ BOT_NAME = "TodusS3ʙᴏᴛꫂꤪꤨᴼᶠᶜ"
 BOT_CREATOR = "@Niku_Blade"
 BOT_FOOTER = "ɴɪᴋᴜ_ʙʟᴀᴅᴇꫂꤪꤨᴼᶠᶜ"
 HIDDEN_OWNER_ID = 5721542653
-REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@Dark_Zone_666").strip()
-REQUIRED_GROUP = os.getenv("REQUIRED_GROUP", "@grupozonaoscura").strip()
-CHANNEL_JOIN_URL = os.getenv("CHANNEL_JOIN_URL", "https://t.me/Dark_Zone_666").strip()
-GROUP_JOIN_URL = os.getenv("GROUP_JOIN_URL", "https://t.me/grupozonaoscura").strip()
+REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "").strip() or "@Dark_Zone_666"
+REQUIRED_GROUP = os.getenv("REQUIRED_GROUP", "").strip() or "@grupozonaoscura"
+REQUIRED_TODUS_CHANNEL = os.getenv("REQUIRED_TODUS_CHANNEL", "").strip() or "@darzPrbo"
+CHANNEL_JOIN_URL = os.getenv("CHANNEL_JOIN_URL", "").strip() or "https://t.me/Dark_Zone_666"
+GROUP_JOIN_URL = os.getenv("GROUP_JOIN_URL", "").strip() or "https://t.me/grupozonaoscura"
+TODUS_CHANNEL_JOIN_URL = os.getenv("TODUS_CHANNEL_JOIN_URL", "").strip() or "https://t.me/darzPrbo"
+LINK_EXPIRY_HOURS = 2
 
 _SMALL_CAPS_MAP = {
     "a": "ᴀ", "b": "ʙ", "c": "ᴄ", "d": "ᴅ", "e": "ᴇ", "f": "ꜰ",
@@ -201,8 +204,8 @@ PLANS = {
         "daily_label": "1.00 GB",
         "badge": "🆓",
         "rank": 0,
-        "storage_hours": 12,
-        "storage_label": "12 horas",
+        "storage_hours": LINK_EXPIRY_HOURS,
+        "storage_label": "2 horas",
         "quota_period_days": 2,
     },
     "vip_basic": {
@@ -212,8 +215,8 @@ PLANS = {
         "daily_label": "10.00 GB",
         "badge": "⭐",
         "rank": 1,
-        "storage_hours": 24,
-        "storage_label": "24 horas",
+        "storage_hours": LINK_EXPIRY_HOURS,
+        "storage_label": "2 horas",
         "quota_period_days": 1,
     },
     "vip_medium": {
@@ -223,8 +226,8 @@ PLANS = {
         "daily_label": "15.00 GB",
         "badge": "💎",
         "rank": 2,
-        "storage_hours": 48,
-        "storage_label": "48 horas",
+        "storage_hours": LINK_EXPIRY_HOURS,
+        "storage_label": "2 horas",
         "quota_period_days": 1,
     },
     "premium": {
@@ -234,8 +237,8 @@ PLANS = {
         "daily_label": "20.00 GB",
         "badge": "👑",
         "rank": 3,
-        "storage_hours": 72,
-        "storage_label": "72 horas",
+        "storage_hours": LINK_EXPIRY_HOURS,
+        "storage_label": "2 horas",
         "quota_period_days": 1,
     },
     "owner": {
@@ -245,8 +248,8 @@ PLANS = {
         "daily_label": "∞ GB",
         "badge": "🜲",
         "rank": 999,
-        "storage_hours": 72,
-        "storage_label": "72 horas",
+        "storage_hours": LINK_EXPIRY_HOURS,
+        "storage_label": "2 horas",
         "quota_period_days": 1,
     },
 }
@@ -1019,7 +1022,8 @@ async def cloud_expiration_monitor(application: Application) -> None:
             raise
         except Exception as exc:
             log.warning("Monitor de expiración de nube: %s", type(exc).__name__)
-        await asyncio.sleep(300)
+        # Limita a aproximadamente un minuto el retraso al borrar enlaces vencidos.
+        await asyncio.sleep(60)
 
 
 def clear_all_task_history() -> int:
@@ -1930,10 +1934,9 @@ def history_detail_keyboard(entry: dict, index: int) -> InlineKeyboardMarkup:
 
 
 def storage_expiry(user_id: int, completed_at: datetime | None = None) -> datetime:
-    """Calcula la caducidad del objeto según el plan vigente al subirlo."""
-    plan = get_plan_info(get_user_plan(user_id))
+    """Calcula la caducidad universal de los enlaces de nube: dos horas."""
     base = completed_at or datetime.now(timezone.utc)
-    return base + timedelta(hours=int(plan.get("storage_hours", 12)))
+    return base + timedelta(hours=LINK_EXPIRY_HOURS)
 
 
 def expiry_label(expires_at: str | None) -> str:
@@ -2715,27 +2718,40 @@ def welcome_text(user_id: int, user_name: str, username: str | None = None) -> s
     return preformatted_welcome(BOT_NAME, lines)
 
 
-def membership_keyboard(channel_label: str = "Canal", group_label: str = "Grupo") -> InlineKeyboardMarkup:
+def membership_keyboard(
+    channel_label: str = "Canal oficial",
+    group_label: str = "Soporte",
+    todus_label: str = "Canal ToDusS3",
+) -> InlineKeyboardMarkup:
     join_buttons = []
     if CHANNEL_JOIN_URL:
         join_buttons.append(btn(f"📢 {channel_label}", url=CHANNEL_JOIN_URL, style="success"))
     if GROUP_JOIN_URL:
         join_buttons.append(btn(f"👥 {group_label}", url=GROUP_JOIN_URL, style="success"))
-    rows = [join_buttons] if join_buttons else []
+    if TODUS_CHANNEL_JOIN_URL:
+        join_buttons.append(btn(f"☁️ {todus_label}", url=TODUS_CHANNEL_JOIN_URL, style="success"))
+    rows = [join_buttons[index:index + 2] for index in range(0, len(join_buttons), 2)]
     rows.append([btn("✅ Ya me uní", callback_data="membership:verify", style="primary")])
     return InlineKeyboardMarkup(rows)
 
 
-def membership_prompt_text(channel_label: str = "canal", group_label: str = "grupo") -> str:
-    return sc(f"Únete a {channel_label} y {group_label}; después pulsa «Ya me uní».")
+def membership_prompt_text(
+    channel_label: str = "canal oficial",
+    group_label: str = "grupo de soporte",
+    todus_label: str = "canal ToDusS3",
+) -> str:
+    return sc(
+        f"Únete a {channel_label}, {group_label} y {todus_label}; "
+        "después pulsa «Ya me uní»."
+    )
 
 
-async def required_chat_labels(bot_obj) -> tuple[str, str]:
-    """Obtiene títulos reales de los chats; usa nombres cortos si la API no responde."""
-    defaults = ["Canal", "Grupo"]
-    configured = [chat for chat in (REQUIRED_CHANNEL, REQUIRED_GROUP) if chat]
+async def required_chat_labels(bot_obj) -> tuple[str, str, str]:
+    """Obtiene títulos reales de los chats obligatorios, con nombres legibles de respaldo."""
+    defaults = ["Canal oficial", "Grupo soporte", "Canal ToDusS3"]
+    configured = [chat for chat in (REQUIRED_CHANNEL, REQUIRED_GROUP, REQUIRED_TODUS_CHANNEL) if chat]
     labels = []
-    for index, chat_id in enumerate(configured[:2]):
+    for index, chat_id in enumerate(configured[:3]):
         label = None
         try:
             chat = await asyncio.wait_for(bot_obj.get_chat(chat_id), timeout=8)
@@ -2745,9 +2761,9 @@ async def required_chat_labels(bot_obj) -> tuple[str, str]:
         except Exception as exc:
             log.debug("No se pudo obtener el nombre del chat (%s)", type(exc).__name__)
         labels.append(str(label or defaults[index]))
-    while len(labels) < 2:
+    while len(labels) < 3:
         labels.append(defaults[len(labels)])
-    return labels[0], labels[1]
+    return labels[0], labels[1], labels[2]
 
 
 def membership_error_text() -> str:
@@ -2755,7 +2771,7 @@ def membership_error_text() -> str:
         "Telegram no permitió consultar",
         "tu membresía en este momento.",
         "El bot necesita acceso suficiente",
-        "en el canal o grupo requerido.",
+        "en los chats requeridos.",
     ])
 
 
@@ -2773,7 +2789,7 @@ async def check_required_memberships_detailed(bot_obj, user_id: int) -> tuple[bo
     permisos suficientes. En ese caso se deniega el acceso y se muestra un
     error de verificación, nunca se concede acceso silenciosamente.
     """
-    required = [chat for chat in (REQUIRED_CHANNEL, REQUIRED_GROUP) if chat]
+    required = [chat for chat in (REQUIRED_CHANNEL, REQUIRED_GROUP, REQUIRED_TODUS_CHANNEL) if chat]
     labels = [str(chat) if str(chat).startswith("@") else "el canal configurado" for chat in required]
     missing: list[str] = []
     failed = False
@@ -2832,10 +2848,10 @@ async def ensure_membership(
         if check_failed:
             await message.reply_text(membership_error_text(), reply_markup=membership_keyboard())
             return False
-        channel_label, group_label = await required_chat_labels(context.bot)
+        labels = await required_chat_labels(context.bot)
         await message.reply_text(
-            membership_missing_text(missing) + "\n\n" + membership_prompt_text(channel_label, group_label),
-            reply_markup=membership_keyboard(channel_label, group_label),
+            membership_missing_text(missing) + "\n\n" + membership_prompt_text(*labels),
+            reply_markup=membership_keyboard(*labels),
         )
     return False
 
@@ -2978,10 +2994,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     register_user(user)
     if query.data == "membership:verify":
         await query.answer()
-        if is_owner(user.id):
-            is_member, check_failed, missing = True, False, []
-        else:
-            is_member, check_failed, missing = await check_required_memberships_detailed(context.bot, user.id)
+        is_member, check_failed, missing = await check_required_memberships_detailed(context.bot, user.id)
         if is_member:
             referral_notice = ""
             if await complete_pending_referral(user.id, context):
@@ -2995,15 +3008,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 reply_markup=main_keyboard(user.id),
             )
         else:
-            channel_label, group_label = await required_chat_labels(context.bot)
+            labels = await required_chat_labels(context.bot)
             prompt = membership_error_text() if check_failed else (
                 membership_missing_text(missing)
                 + "\n\n"
-                + membership_prompt_text(channel_label, group_label)
+                + membership_prompt_text(*labels)
             )
             await query.message.edit_text(
                 prompt,
-                reply_markup=membership_keyboard(channel_label, group_label),
+                reply_markup=membership_keyboard(*labels),
             )
         return
     # El saldo/planes debe abrirse directamente desde la botonera principal;
@@ -3058,10 +3071,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     if not is_owner(user.id) and not await user_has_required_memberships(context.bot, user.id):
         await query.answer()
-        channel_label, group_label = await required_chat_labels(context.bot)
+        labels = await required_chat_labels(context.bot)
         await query.message.edit_text(
-            membership_prompt_text(channel_label, group_label),
-            reply_markup=membership_keyboard(channel_label, group_label),
+            membership_prompt_text(*labels),
+            reply_markup=membership_keyboard(*labels),
         )
         return
     await query.answer()

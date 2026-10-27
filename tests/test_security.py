@@ -53,7 +53,8 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
             effective_message=message,
         )
         member_bot = SimpleNamespace(get_chat_member=AsyncMock(
-            side_effect=[SimpleNamespace(status="member"), SimpleNamespace(status="member")]
+            side_effect=[SimpleNamespace(status="member"), SimpleNamespace(status="member"),
+                         SimpleNamespace(status="member")]
         ))
         await start_command(update, SimpleNamespace(bot=member_bot))
 
@@ -68,14 +69,15 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(kwargs.get("reply_markup"))
         self.assertIn("├──────────────────────┤", args[0])
 
-    async def test_start_requires_channel_and_group_before_welcome(self):
+    async def test_start_requires_all_three_chats_before_welcome(self):
         message = SimpleNamespace(reply_text=AsyncMock())
         update = SimpleNamespace(
             effective_user=SimpleNamespace(id=123456, full_name="Ana Pérez"),
             effective_message=message,
         )
         member_bot = SimpleNamespace(get_chat_member=AsyncMock(
-            side_effect=[SimpleNamespace(status="left"), SimpleNamespace(status="left")]
+            side_effect=[SimpleNamespace(status="left"), SimpleNamespace(status="left"),
+                         SimpleNamespace(status="left")]
         ))
         await start_command(update, SimpleNamespace(bot=member_bot))
 
@@ -84,12 +86,13 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("TodusS3ʙᴏᴛꫂꤪꤨᴼᶠᶜ", args[0])
         self.assertIn("@Dark_Zone_666", args[0])
         self.assertIn("@grupozonaoscura", args[0])
+        self.assertIn("@darzPrbo", args[0])
         buttons = [button for row in kwargs["reply_markup"].inline_keyboard for button in row]
         self.assertEqual(
             [button.url for button in buttons if button.url],
-            ["https://t.me/Dark_Zone_666", "https://t.me/grupozonaoscura"],
+            ["https://t.me/Dark_Zone_666", "https://t.me/grupozonaoscura", "https://t.me/darzPrbo"],
         )
-        self.assertEqual(member_bot.get_chat_member.await_count, 2)
+        self.assertEqual(member_bot.get_chat_member.await_count, 3)
 
     async def test_start_gate_also_applies_to_owner(self):
         message = SimpleNamespace(reply_text=AsyncMock())
@@ -98,7 +101,8 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
             effective_message=message,
         )
         owner_bot = SimpleNamespace(get_chat_member=AsyncMock(
-            side_effect=[SimpleNamespace(status="left"), SimpleNamespace(status="member")]
+            side_effect=[SimpleNamespace(status="left"), SimpleNamespace(status="member"),
+                         SimpleNamespace(status="member")]
         ))
         await start_command(update, SimpleNamespace(bot=owner_bot))
 
