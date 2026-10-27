@@ -2907,6 +2907,11 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 "descarga todas y únelas con ZArchiver",
                 "usando la opción Unir/Combinar partes.",
             ]))
+            await publish_channel_notice(
+                application.bot,
+                "📤 ᴇɴᴠíᴏ ᴄᴏᴍᴘʟᴇᴛᴀᴅᴏ",
+                "Se le envió su archivo correspondiente al usuario que lo solicitó.",
+            )
         else:
             await job.status_message.edit_text(
                 transfer_complete_text(
