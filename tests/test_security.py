@@ -49,7 +49,7 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_start_shows_optional_channel_screen(self):
         message = SimpleNamespace(reply_text=AsyncMock())
         update = SimpleNamespace(
-            effective_user=SimpleNamespace(id=123456, full_name="Ana Pérez"),
+            effective_user=SimpleNamespace(id=8000000001, full_name="Ana Pérez"),
             effective_message=message,
         )
         member_bot = SimpleNamespace(get_chat_member=AsyncMock())
@@ -66,7 +66,7 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_start_channels_are_visual_and_do_not_block_nonmember(self):
         message = SimpleNamespace(reply_text=AsyncMock())
         update = SimpleNamespace(
-            effective_user=SimpleNamespace(id=123456, full_name="Ana Pérez"),
+            effective_user=SimpleNamespace(id=8000000002, full_name="Ana Pérez"),
             effective_message=message,
         )
         member_bot = SimpleNamespace(get_chat_member=AsyncMock())

@@ -91,6 +91,7 @@ REQUIRED_TODUS_CHANNEL = os.getenv("REQUIRED_TODUS_CHANNEL", "").strip() or "@da
 CHANNEL_JOIN_URL = os.getenv("CHANNEL_JOIN_URL", "").strip() or "https://t.me/Dark_Zone_666"
 GROUP_JOIN_URL = os.getenv("GROUP_JOIN_URL", "").strip() or "https://t.me/grupozonaoscura"
 TODUS_CHANNEL_JOIN_URL = os.getenv("TODUS_CHANNEL_JOIN_URL", "").strip() or "https://t.me/darzPrbo"
+PUBLIC_CHANNEL_ID = os.getenv("PUBLIC_CHANNEL_ID", "").strip() or "@darzPrbo"
 LINK_EXPIRY_HOURS = 2
 
 _SMALL_CAPS_MAP = {
@@ -387,10 +388,10 @@ def _ensure_data_quota_fields(entry: dict) -> dict:
     return entry
 
 
-def register_user(user) -> None:
-    """Registra o actualiza al usuario que interactúa con el bot."""
+def register_user(user) -> bool:
+    """Registra/actualiza al usuario y devuelve True solo en su primer registro."""
     if not user or is_owner(getattr(user, "id", 0)):
-        return
+        return False
     try:
         now = datetime.now(timezone.utc)
         users_data = _load_json(USERS_DATA_FILE)
@@ -401,6 +402,7 @@ def register_user(user) -> None:
         entry = users.get(key, {})
         if not isinstance(entry, dict):
             entry = {}
+        is_new_user = not bool(entry.get("first_seen"))
         entry.setdefault("balance", REFERRAL_START_BALANCE)
         entry.setdefault("welcome_reward", REFERRAL_START_BALANCE)
         _ensure_data_quota_fields(entry)
@@ -416,8 +418,41 @@ def register_user(user) -> None:
         users[key] = entry
         users_data["users"] = users
         _save_json(USERS_DATA_FILE, users_data)
+        return is_new_user
     except Exception as exc:
         log.warning("No se pudo registrar al usuario (%s).", type(exc).__name__)
+        return False
+
+
+async def publish_channel_notice(bot_obj, title: str, body: str) -> bool:
+    """Publica un aviso anónimo; nunca incluye usuario, ID, nombre de archivo ni enlace."""
+    try:
+        await bot_obj.send_message(
+            chat_id=PUBLIC_CHANNEL_ID,
+            text=card(title, [body]),
+            disable_web_page_preview=True,
+        )
+        return True
+    except Exception as exc:
+        log.warning("No se pudo publicar aviso en el canal (%s).", type(exc).__name__)
+        return False
+
+
+def channel_prompt_completed(user_id: int) -> bool:
+    """Indica si la invitación opcional ya se mostró y el usuario continuó."""
+    completed = _load_json(USERS_DATA_FILE).get("channel_prompt_completed", {})
+    return bool(completed.get(str(user_id))) if isinstance(completed, dict) else False
+
+
+def mark_channel_prompt_completed(user_id: int) -> None:
+    """Guarda de forma persistente que el usuario ya continuó al menú."""
+    data = _load_json(USERS_DATA_FILE)
+    completed = data.get("channel_prompt_completed", {})
+    if not isinstance(completed, dict):
+        completed = {}
+    completed[str(user_id)] = True
+    data["channel_prompt_completed"] = completed
+    _save_json(USERS_DATA_FILE, data)
 
 
 def get_user_balance(user_id: int) -> int:
@@ -2523,8 +2558,11 @@ async def process_task(job: TransferTask, application: Application) -> None:
             reply_markup=final_keyboard,
             disable_web_page_preview=True,
         )
-        # Modo silencioso: no se publican avisos de archivos en canales o grupos.
-        # El respaldo cifrado configurado en TELEGRAM_BACKUP_CHAT_ID sigue funcionando.
+        await publish_channel_notice(
+            application.bot,
+            "📥 ɴᴜᴇᴠᴀ ᴛʀᴀɴꜱꜰᴇʀᴇɴᴄɪᴀ",
+            "Una descarga y subida se completó correctamente.",
+        )
         if temp_path:
             temp_path.unlink(missing_ok=True)
             if temp_path.parent.name.startswith("tg-platform-"):
@@ -2681,26 +2719,22 @@ def welcome_text(user_id: int, user_name: str, username: str | None = None) -> s
             *identity_lines,
             f"🏷 Plan: 🜲 Plan Creador",
             f"📦 Disponible: ∞ GB",
-            f"⏳ Acceso permanente",
             "",
-            "📥 Envía un archivo o",
-            "   pega un enlace público",
-            "   y súbelo a la nube.",
-            "",
-            "👑 Creador activo",
+            "📥 Envía archivo o enlace público.",
+            "👑 Creador · ∞ GB",
         ]
         return card_with_credit(BOT_NAME, lines, preserve_title=True)
     plan = get_plan_info(get_user_plan(user_id))
     remaining = get_remaining_quota(user_id)
-    plan_label = "Gratis · 1 GB de bienvenida" if plan["rank"] == 0 else f"{plan['badge']} {plan['display']}"
+    plan_label = "Gratis" if plan["rank"] == 0 else f"{plan['badge']} {plan['display']}"
     lines = [
         f"👋 Hola, {short_name}",
         "",
         *identity_lines,
         f"🏷 Plan: {plan_label}",
         f"💰 Saldo: {get_user_balance(user_id)}$",
-        f"📦 Datos disponibles: {data_quota_label(remaining)}",
-        "♾️ Sin vencimiento; se usa al transferir.",
+        f"📦 Disponible: {data_quota_label(remaining)}",
+        "♾️ Sin vencimiento",
     ]
     if plan["rank"] > 0:
         _, rem_days = get_plan_expiry_info(user_id)
@@ -2708,9 +2742,8 @@ def welcome_text(user_id: int, user_name: str, username: str | None = None) -> s
             lines.append(f"⏳ Días restantes: {rem_days}")
     lines += [
         "",
-        "📥 Envía un archivo o",
-        "   pega un enlace público",
-        "   para subirlo a la nube.",
+        "📥 Envía un archivo o enlace",
+        "   público para subirlo.",
     ]
     return card_with_credit(BOT_NAME, lines, preserve_title=True)
 
@@ -2849,6 +2882,11 @@ async def complete_pending_referral(user_id: int, context: ContextTypes.DEFAULT_
     if referrer_id is None:
         return False
     schedule_data_backup(context.application, "recompensa de referido")
+    await publish_channel_notice(
+        context.bot,
+        "🎉 ɴᴜᴇᴠᴏ ʀᴇꜰᴇʀɪᴅᴏ",
+        "Se confirmó un referido y se acreditó saldo.",
+    )
     try:
         await context.bot.send_message(
             chat_id=referrer_id,
@@ -2875,7 +2913,26 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         match = re.fullmatch(r"ref_(\d{1,20})", str(args[0]).strip(), re.IGNORECASE)
         if match:
             remember_pending_referral(user.id, int(match.group(1)))
-    register_user(user)
+    is_new_user = register_user(user)
+    if is_new_user:
+        await publish_channel_notice(
+            context.bot,
+            "👋 ɴᴜᴇᴠᴏ ᴜꜱᴜᴀʀɪᴏ",
+            "Una persona acaba de iniciar el bot.",
+        )
+    if channel_prompt_completed(user.id):
+        referral_notice = ""
+        if await complete_pending_referral(user.id, context):
+            referral_notice = "\n\n🎁 Recibiste 1 GB gratis y 5$ de bienvenida por entrar con un enlace de invitación."
+        await update.effective_message.reply_text(
+            welcome_text(
+                user.id,
+                getattr(user, "full_name", "") or getattr(user, "first_name", ""),
+                getattr(user, "username", None),
+            ) + referral_notice,
+            reply_markup=main_keyboard(user.id),
+        )
+        return
     await update.effective_message.reply_text(
         membership_prompt_text(),
         reply_markup=membership_keyboard(),
@@ -2973,6 +3030,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     register_user(user)
     if query.data == "membership:verify":
         await query.answer()
+        mark_channel_prompt_completed(user.id)
         referral_notice = ""
         if await complete_pending_referral(user.id, context):
             referral_notice = "\n\n🎁 Recibiste 1 GB gratis y 5$ de bienvenida por entrar con un enlace de invitación."

@@ -237,8 +237,8 @@ class RequestedFeatureTests(unittest.TestCase):
         self.assertFalse(text.startswith("<pre>"))
         self.assertIn("\n┃                       \n", text)
         self.assertIn("👋 ʜᴏʟᴀ, ɴɪᴋᴜ_ʙʟᴀᴅᴇ", text)
-        self.assertIn("📥 ᴇɴᴠɪ́ᴀ ᴜɴ ᴀʀᴄʜɪᴠᴏ ᴏ", text)
-        self.assertIn("ᴄʀᴇᴀᴅᴏʀ ᴀᴄᴛɪᴠᴏ", text)
+        self.assertIn("📥 ᴇɴᴠɪ́ᴀ ᴀʀᴄʜɪᴠᴏ ᴏ ᴇɴʟᴀᴄᴇ", text)
+        self.assertIn("ᴄʀᴇᴀᴅᴏʀ · ∞ ɢʙ", text)
 
     def test_main_keyboard_matches_reference_layout_with_inline_actions(self):
         markup = main_keyboard()
@@ -309,6 +309,51 @@ class RequestedFeatureTests(unittest.TestCase):
 
 
 class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
+    async def test_channel_prompt_is_shown_once_and_new_user_notice_is_anonymous(self):
+        import bot as bot_module
+        with tempfile.TemporaryDirectory() as directory:
+            old_path = bot_module.USERS_DATA_FILE
+            bot_module.USERS_DATA_FILE = str(Path(directory) / "users.json")
+            try:
+                user = SimpleNamespace(id=8000000011, first_name="Luz", full_name="Luz Rivera", username="luz")
+                bot_obj = SimpleNamespace(send_message=AsyncMock())
+                context = SimpleNamespace(
+                    bot=bot_obj,
+                    application=SimpleNamespace(bot_data={"bot_username": "toduss3_bot"}),
+                    args=[],
+                    user_data={},
+                )
+                first_message = SimpleNamespace(reply_text=AsyncMock())
+                await start_command(
+                    SimpleNamespace(effective_user=user, effective_message=first_message), context
+                )
+                self.assertIn("ᴄᴀɴᴀʟᴇꜱ ᴏꜰɪᴄɪᴀʟᴇꜱ", first_message.reply_text.call_args.args[0])
+                bot_obj.send_message.assert_awaited_once()
+                announcement = bot_obj.send_message.call_args.kwargs
+                self.assertEqual(announcement["chat_id"], "@darzPrbo")
+                self.assertNotIn("@luz", announcement["text"])
+                self.assertNotIn(str(user.id), announcement["text"])
+
+                verify_message = SimpleNamespace(edit_text=AsyncMock())
+                query = SimpleNamespace(data="membership:verify", answer=AsyncMock(), message=verify_message)
+                await button_callback(
+                    SimpleNamespace(callback_query=query, effective_user=user), context
+                )
+                query.answer.assert_awaited_once()
+                self.assertTrue(bot_module.channel_prompt_completed(user.id))
+
+                second_message = SimpleNamespace(reply_text=AsyncMock())
+                await start_command(
+                    SimpleNamespace(effective_user=user, effective_message=second_message), context
+                )
+                self.assertIn("ʜᴏʟᴀ, ʟᴜᴢ", second_message.reply_text.call_args.args[0])
+                self.assertFalse(any(button.url for button in all_buttons(
+                    second_message.reply_text.call_args.kwargs["reply_markup"]
+                )))
+                self.assertEqual(bot_obj.send_message.await_count, 1)
+            finally:
+                bot_module.USERS_DATA_FILE = old_path
+
     async def test_balance_callback_displays_personal_link_without_membership_lookup(self):
         import bot as bot_module
         with tempfile.TemporaryDirectory() as directory:
@@ -394,7 +439,7 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
         query_message = SimpleNamespace(edit_text=AsyncMock())
         query = SimpleNamespace(data="membership:verify", answer=AsyncMock(), message=query_message)
         update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(
-            id=123456, full_name="Ana Pérez", first_name="Ana", username="ana"
+            id=8000000013, full_name="Ana Pérez", first_name="Ana", username="ana"
         ))
 
         await button_callback(update, SimpleNamespace(bot=bot))
@@ -410,7 +455,7 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
         query_message = SimpleNamespace(edit_text=AsyncMock())
         query = SimpleNamespace(data="membership:verify", answer=AsyncMock(), message=query_message)
         update = SimpleNamespace(callback_query=query, effective_user=SimpleNamespace(
-            id=123456, full_name="Ana Pérez", first_name="Ana", username="ana"
+            id=8000000014, full_name="Ana Pérez", first_name="Ana", username="ana"
         ))
 
         await button_callback(update, SimpleNamespace(bot=bot))
@@ -457,7 +502,19 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(get_user_balance(HIDDEN_OWNER_ID), 5)
                 query.answer.assert_awaited_once()
-                telegram_bot.send_message.assert_awaited_once()
+                self.assertEqual(telegram_bot.send_message.await_count, 3)
+                public_calls = [
+                    call for call in telegram_bot.send_message.call_args_list
+                    if call.kwargs.get("chat_id") == "@darzPrbo"
+                ]
+                self.assertEqual(len(public_calls), 2)
+                for call in public_calls:
+                    self.assertNotIn("Ana", call.kwargs["text"])
+                    self.assertNotIn(str(user.id), call.kwargs["text"])
+                self.assertTrue(any(
+                    call.kwargs.get("chat_id") == HIDDEN_OWNER_ID
+                    for call in telegram_bot.send_message.call_args_list
+                ))
                 self.assertIn("1 GB gratis", message.edit_text.call_args.args[0])
                 self.assertIn("5$ de bienvenida", message.edit_text.call_args.args[0])
                 invited = bot_module._load_json(bot_module.USERS_DATA_FILE)["users"][str(user.id)]
