@@ -2910,7 +2910,11 @@ async def process_task(job: TransferTask, application: Application) -> None:
             await publish_channel_notice(
                 application.bot,
                 "📤 ᴇɴᴠíᴏ ᴄᴏᴍᴘʟᴇᴛᴀᴅᴏ",
-                "Se le envió su archivo correspondiente al usuario que lo solicitó.",
+                [
+                    f"👤 Usuario: {task_public_user_label(job)}",
+                    f"📦 Tamaño enviado: {_size_label(size)}",
+                    "✅ Archivo entregado por ToDus.",
+                ],
             )
         else:
             await job.status_message.edit_text(
