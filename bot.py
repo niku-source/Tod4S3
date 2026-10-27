@@ -2843,6 +2843,13 @@ async def send_service_info_message(message, user_id: int, user_name: str,
     await message.edit_text(caption, reply_markup=markup)
 
 
+async def edit_query_message_text(message, text: str, **kwargs):
+    """Edita caption si el menú actual es una foto; texto en cualquier otro caso."""
+    if getattr(message, "photo", None) and hasattr(message, "edit_caption"):
+        return await message.edit_caption(caption=text, **kwargs)
+    return await message.edit_text(text, **kwargs)
+
+
 def membership_keyboard(
     channel_label: str = "Canal oficial",
     group_label: str = "Soporte",
@@ -3141,7 +3148,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # no debe quedar bloqueado por una comprobación de membresía que falle.
     if query.data in {"balance", "plans", "referral:show"} or query.data.startswith(("plans:buy", "plans:cash", "plans:confirm:", "plans:purchase:", "plans:unavailable:")):
         await query.answer()
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             plans_text(user.id, context.application.bot_data.get("bot_username")),
             reply_markup=plans_keyboard(user.id, context.application.bot_data.get("bot_username")),
         )
@@ -3152,7 +3159,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.answer(sc("Paquete no disponible"), show_alert=True)
             return
         await query.answer()
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             data_package_confirmation_text(user.id, package_key),
             reply_markup=data_package_confirmation_keyboard(package_key),
         )
@@ -3168,7 +3175,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 await query.answer(sc("Saldo insuficiente"), show_alert=True)
             else:
                 await query.answer(sc("No se pudo completar la compra"), show_alert=True)
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 plans_text(user.id, context.application.bot_data.get("bot_username")),
                 reply_markup=plans_keyboard(user.id, context.application.bot_data.get("bot_username")),
             )
@@ -3176,7 +3183,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.answer(sc("Paquete comprado"))
         schedule_data_backup(context.application, "paquete de datos comprado")
         package = DATA_PACKAGES[package_key]
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             card("✅ ᴄᴏᴍᴘʀᴀ ᴄᴏᴍᴘʟᴇᴛᴀ", [
                 f"Paquete: {package['name']}",
                 f"Descontado: {package['price']}$",
@@ -3190,7 +3197,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not is_owner(user.id) and not await user_has_required_memberships(context.bot, user.id):
         await query.answer()
         labels = await required_chat_labels(context.bot)
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             membership_prompt_text(*labels),
             reply_markup=membership_keyboard(*labels),
         )
@@ -3198,14 +3205,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.answer()
 
     if query.data == "top:users":
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             public_leaderboard_text(),
             reply_markup=InlineKeyboardMarkup([[btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")]]),
         )
         return
 
     if query.data == "all_menu":
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             card("📄 ᴍᴇɴᴜ́ ᴄᴏᴍᴘʟᴇᴛᴏ", [
                 "Elige una función del bot:",
                 "subir archivos, revisar tu cuota,",
@@ -3216,7 +3223,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if query.data == "action_menu":
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             card("⚙️ ᴀᴄᴄɪᴏɴᴇꜱ", [
                 "Gestiona tus transferencias,",
                 "consulta tu saldo y revisa los datos.",
@@ -3244,7 +3251,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if query.data in {"balance", "plans", "referral:show"}:
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             plans_text(user.id, context.application.bot_data.get("bot_username")),
             reply_markup=plans_keyboard(user.id, context.application.bot_data.get("bot_username")),
         )
@@ -3256,17 +3263,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
 
         if query.data == "admin:open":
-            await query.message.edit_text(admin_panel_text(), reply_markup=admin_keyboard())
+            await edit_query_message_text(query.message, admin_panel_text(), reply_markup=admin_keyboard())
             return
 
         if query.data == "admin:back":
             context.user_data.pop("admin_state", None)
-            await query.message.edit_text(admin_panel_text(), reply_markup=admin_keyboard())
+            await edit_query_message_text(query.message, admin_panel_text(), reply_markup=admin_keyboard())
             return
 
         if query.data == "admin:balance":
             context.user_data["admin_state"] = {"step": "awaiting_balance_user_id"}
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("💰 ᴅᴀʀ ꜱᴀʟᴅᴏ", [
                     "Envía el ID numérico",
                     "del usuario destinatario.",
@@ -3300,7 +3307,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 )
             except Exception:
                 log.info("No se pudo avisar del saldo al usuario %s", target_id)
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("✅ ꜱᴀʟᴅᴏ ᴏᴛᴏʀɢᴀᴅᴏ", [
                     f"ID: {{mono:{target_id}}}",
                     f"Acreditado: {amount}$",
@@ -3311,7 +3318,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
 
         if query.data == "admin:tutorial":
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 admin_tutorial_text(),
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
             )
@@ -3344,14 +3351,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 pi = get_plan_info(pk)
                 lines.append(f"{pi['badge']} {pi['display']}: {count}")
             box = card("📊 ᴇꜱᴛᴀᴅíꜱᴛɪᴄᴀꜱ", lines)
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 f"{box}\n\n{BOT_FOOTER}",
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
             )
             return
 
         if query.data == "admin:top":
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 admin_leaderboard_text(),
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
             )
@@ -3359,7 +3366,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         if query.data.startswith("admin:users:"):
             page = max(0, int(query.data.split(":")[-1]))
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 admin_registered_users_text(page),
                 reply_markup=admin_registered_users_keyboard(page),
             )
@@ -3367,7 +3374,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         if query.data.startswith("admin:user:"):
             target_id = int(query.data.split(":")[-1])
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 admin_user_history_text(target_id),
                 reply_markup=admin_user_history_keyboard(target_id),
             )
@@ -3375,7 +3382,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         if query.data == "admin:user_history":
             context.user_data["admin_state"] = {"step": "admin_history_user"}
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("🗂️ ʜɪꜱᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", ["Envía el ID numérico", "del usuario que quieres gestionar."]),
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
             )
@@ -3383,7 +3390,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         if query.data == "admin:all_history_confirm":
             total_entries = sum(len(entries) for entries in all_task_history().values() if isinstance(entries, list))
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("⚠️ ʙᴏʀʀᴀᴅᴏ ɢʟᴏʙᴀʟ", [
                     f"Se eliminarán {total_entries} registros",
                     "y sus archivos de ToDus S3.",
@@ -3413,7 +3420,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                             log.warning("No se pudo borrar objeto global %s", url)
             affected = clear_all_task_history()
             schedule_data_backup(context.application, "borrado global de historial")
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("✅ ʜɪꜱᴛᴏʀɪᴀʟ ʙᴏʀʀᴀᴅᴏ", [
                     f"Usuarios afectados: {affected}",
                     f"Enlaces eliminados de ToDus: {deleted_cloud}",
@@ -3436,7 +3443,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     except Exception:
                         log.warning("No se pudo borrar objeto admin %s", url)
                 delete_task_history_entry(target_id, index)
-            await query.message.edit_text(admin_user_history_text(target_id), reply_markup=admin_user_history_keyboard(target_id))
+            await edit_query_message_text(query.message, admin_user_history_text(target_id), reply_markup=admin_user_history_keyboard(target_id))
             return
 
         if query.data.startswith("admin:histclear:"):
@@ -3449,18 +3456,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     except Exception:
                         log.warning("No se pudo borrar objeto admin %s", url)
             clear_task_history(target_id)
-            await query.message.edit_text(admin_user_history_text(target_id), reply_markup=admin_user_history_keyboard(target_id))
+            await edit_query_message_text(query.message, admin_user_history_text(target_id), reply_markup=admin_user_history_keyboard(target_id))
             return
 
         if query.data.startswith("admin:quotareset:"):
             target_id = int(query.data.split(":")[-1])
             reset_user_daily_usage(target_id)
-            await query.message.edit_text(admin_user_history_text(target_id), reply_markup=admin_user_history_keyboard(target_id))
+            await edit_query_message_text(query.message, admin_user_history_text(target_id), reply_markup=admin_user_history_keyboard(target_id))
             return
 
         if query.data == "admin:broadcast":
             context.user_data["admin_state"] = {"step": "broadcast_message"}
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("📢 ᴅɪꜰᴜꜱɪóɴ", [
                     "Escribe el mensaje que",
                     "recibirán los usuarios",
@@ -3474,7 +3481,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
 
         if query.data == "admin:report":
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 admin_report_text(),
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
             )
@@ -3489,7 +3496,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "",
                 "Ejemplo: 123456789",
             ]
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("🔍 ᴄᴏɴꜱᴜʟᴛᴀʀ ᴜꜱᴜᴀʀɪᴏ", lines),
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
             )
@@ -3508,7 +3515,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     "Envía el ID de",
                     "Telegram del usuario.",
                 ]
-                await query.message.edit_text(
+                await edit_query_message_text(query.message,
                     card("🆓 ᴀꜱɪɢɴᴀʀ ɢʀᴀᴛɪꜱ", lines),
                     reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
                 )
@@ -3521,7 +3528,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     "Selecciona el tiempo",
                     "de duración:",
                 ]
-                await query.message.edit_text(
+                await edit_query_message_text(query.message,
                     card(f"⏳ ᴛɪᴇᴍᴘᴏ · {plan['display']}", lines),
                     reply_markup=admin_duration_keyboard(plan_key),
                 )
@@ -3542,7 +3549,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "de Telegram del",
                 "usuario.",
             ]
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("🆔 ɪɴɢʀᴇꜱᴀʀ ᴜꜱᴜᴀʀɪᴏ", lines),
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
             )
@@ -3559,7 +3566,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "",
                 "Ejemplo: 45, 60, 365...",
             ]
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("✏️ ᴅíᴀꜱ ᴘᴇʀꜱᴏɴᴀʟɪᴢᴀᴅᴏꜱ", lines),
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
             )
@@ -3589,7 +3596,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             lines_admin.append("")
             lines_admin.append("💾 Guardado correctamente")
 
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("✅ ᴘʟᴀɴ ᴀꜱɪɢɴᴀᴅᴏ", lines_admin),
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
             )
@@ -3629,24 +3636,24 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 raise ValueError
         except ValueError:
             return
-        await query.message.edit_text(help_page_text(page), reply_markup=help_keyboard(page))
+        await edit_query_message_text(query.message, help_page_text(page), reply_markup=help_keyboard(page))
         return
 
     if query.data == "my_quota":
         box = card("📊 ᴍɪ ᴄᴜᴏᴛᴀ", quota_lines(user.id))
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             f"{box}\n\n{BOT_FOOTER}",
             reply_markup=home_keyboard(),
         )
         return
 
     if query.data == "downloads":
-        await query.message.edit_text(download_menu_text(), reply_markup=download_menu_keyboard())
+        await edit_query_message_text(query.message, download_menu_text(), reply_markup=download_menu_keyboard())
         return
 
     if query.data in {"download:telegram", "download:url"}:
         source = query.data.split(":", 1)[1]
-        await query.message.edit_text(download_prompt_text(source), reply_markup=download_prompt_keyboard())
+        await edit_query_message_text(query.message, download_prompt_text(source), reply_markup=download_prompt_keyboard())
         return
 
     if query.data == "open_queue":
@@ -3656,7 +3663,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                       callback_data=f"j:{j.task_id}:open")] for j in jobs]
         rows.append([btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")])
         lines = [task_summary(j) for j in jobs] if jobs else ["No hay tareas activas."]
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             card("📋 ᴄᴏʟᴀ", lines), reply_markup=InlineKeyboardMarkup(rows),
         )
         return
@@ -3664,7 +3671,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if query.data == "open_history":
         persistent = get_task_history(user.id, 10)
         if not persistent:
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("📜 ʜɪꜱᴛᴏʀɪᴀʟ", ["No tienes historial", "todavía."]),
                 reply_markup=home_keyboard(),
             )
@@ -3687,7 +3694,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         rows.append([btn("🗑️ ʙᴏʀʀᴀʀ ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="history:delete_menu")])
         rows.append([btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")])
         box = card("📜 ʜɪꜱᴛᴏʀɪᴀʟ", lines)
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             f"{box}\n\n{BOT_FOOTER}",
             reply_markup=InlineKeyboardMarkup(rows),
             disable_web_page_preview=True,
@@ -3701,7 +3708,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         except (ValueError, IndexError, TypeError):
             await query.answer(sc("Ese historial ya no existe"), show_alert=True)
             return
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             transfer_complete_text(
                 filename=entry.get("filename", "Archivo"),
                 size=entry.get("size", 0),
@@ -3725,7 +3732,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if not urls:
             delete_task_history_entry(user.id, index)
             schedule_data_backup(context.application, "borrado de historial")
-            await query.message.edit_text(card("✅ ʜɪꜱᴛᴏʀɪᴀʟ ʙᴏʀʀᴀᴅᴏ", ["No había archivos para borrar."]), reply_markup=home_keyboard())
+            await edit_query_message_text(query.message, card("✅ ʜɪꜱᴛᴏʀɪᴀʟ ʙᴏʀʀᴀᴅᴏ", ["No había archivos para borrar."]), reply_markup=home_keyboard())
             return
         results = await asyncio.gather(*(
             asyncio.to_thread(delete_from_todus_s3, url) for url in urls
@@ -3736,7 +3743,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
         delete_task_history_entry(user.id, index)
         schedule_data_backup(context.application, "borrado de archivo")
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             card("✅ ᴀʀᴄʜɪᴠᴏ ʙᴏʀʀᴀᴅᴏ", [
                 "El archivo y su registro",
                 "fueron eliminados.",
@@ -3748,7 +3755,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if query.data == "history:delete_menu":
         entries = get_task_history(user.id, 10)
         if not entries:
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("🗑️ ʙᴏʀʀᴀʀ ʜɪꜱᴛᴏʀɪᴀʟ", ["No hay registros", "para eliminar."]),
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="open_history")]]),
             )
@@ -3761,7 +3768,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             rows.append([btn(f"🗑️ ᴇʟɪᴍɪɴᴀʀ {number}", callback_data=f"history:delete:{number - 1}")])
         rows.append([btn("🧹 ʙᴏʀʀᴀʀ ᴛᴏᴅᴏ ᴇʟ ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="history:clear:confirm")])
         rows.append([btn("⬅️ ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="open_history")])
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             card("🗑️ ʙᴏʀʀᴀʀ ʜɪꜱᴛᴏʀɪᴀʟ", lines),
             reply_markup=InlineKeyboardMarkup(rows),
         )
@@ -3790,7 +3797,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.answer(sc("Historial eliminado"))
         entries = get_task_history(user.id, 10)
         if not entries:
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("📜 ʜɪꜱᴛᴏʀɪᴀʟ", ["El registro fue eliminado.", "No quedan descargas guardadas."]),
                 reply_markup=home_keyboard(),
             )
@@ -3803,11 +3810,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             rows.append([btn(f"🗑️ ᴇʟɪᴍɪɴᴀʀ {number}", callback_data=f"history:delete:{number - 1}")])
         rows.append([btn("🧹 ʙᴏʀʀᴀʀ ᴛᴏᴅᴏ ᴇʟ ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="history:clear:confirm")])
         rows.append([btn("⬅️ ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="open_history")])
-        await query.message.edit_text(card("🗑️ ʙᴏʀʀᴀʀ ʜɪꜱᴛᴏʀɪᴀʟ", lines), reply_markup=InlineKeyboardMarkup(rows))
+        await edit_query_message_text(query.message, card("🗑️ ʙᴏʀʀᴀʀ ʜɪꜱᴛᴏʀɪᴀʟ", lines), reply_markup=InlineKeyboardMarkup(rows))
         return
 
     if query.data == "history:clear:confirm":
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             card("⚠️ ᴄᴏɴꜰɪʀᴍᴀʀ", [
                 "¿Borrar todo el historial?",
                 "",
@@ -3828,7 +3835,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             delete_history_entry_cloud(entry) for entry in entries
         ))
         if not all(results):
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("⚠️ ɴᴏ ꜱᴇ ᴘᴜᴅᴏ ʙᴏʀʀᴀʀ", [
                     "Algunos archivos siguen en la nube.",
                     "El historial no se eliminó para no perder sus enlaces.",
@@ -3842,14 +3849,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
         clear_task_history(user.id)
         schedule_data_backup(context.application, "borrado total del historial")
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             card("✅ ʜɪꜱᴛᴏʀɪᴀʟ ʙᴏʀʀᴀᴅᴏ", ["El historial ha sido borrado con éxito."]),
             reply_markup=home_keyboard(),
         )
         return
 
     if query.data == "history:back":
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             card("📜 ʜɪꜱᴛᴏʀɪᴀʟ", ["Vuelve a abrir /historial", "para ver tus registros."]),
             reply_markup=home_keyboard(),
         )
@@ -3936,7 +3943,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             job.error = "Borrado por el usuario"
             delete_task_history_by_task_id(user.id, job.task_id)
             schedule_data_backup(context.application, "borrado de archivo")
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("🗑️ ᴀʀᴄʜɪᴠᴏ ᴇʟɪᴍɪɴᴀᴅᴏ", [
                     "El archivo fue eliminado",
                     "correctamente de la nube.",
@@ -3962,13 +3969,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if query.data == "support":
         owner_id = parse_owner_id()
         if not owner_id:
-            await query.message.edit_text(
+            await edit_query_message_text(query.message,
                 card("💬 ꜱᴏᴘᴏʀᴛᴇ", ["No disponible actualmente."]),
                 reply_markup=main_keyboard(user.id),
             )
             return
         context.user_data["awaiting_support"] = True
-        await query.message.edit_text(
+        await edit_query_message_text(query.message,
             card("💬 ꜱᴏᴘᴏʀᴛᴇ", [
                 "Escribe tu mensaje y",
                 "se lo enviaré directo",
