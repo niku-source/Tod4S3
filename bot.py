@@ -101,6 +101,12 @@ try:
     LINK_EXPIRY_HOURS = max(0, int(os.getenv("CLOUD_LINK_TTL_HOURS", "2").strip() or "2"))
 except ValueError:
     LINK_EXPIRY_HOURS = 0
+# Modo de entrega del archivo descargado:
+#   "cloud" = subir a ToDus S3 y dar enlaces (comportamiento original)
+#   "chat"  = enviar el archivo directamente al chat privado del usuario
+DELIVERY_MODE = os.getenv("DELIVERY_MODE", "chat").strip().lower() or "chat"
+# Límite de Bot API para enviar documentos: 50 MiB.
+BOT_API_SEND_LIMIT = 50 * MIB
 
 _SMALL_CAPS_MAP = {
     "a": "ᴀ", "b": "ʙ", "c": "ᴄ", "d": "ᴅ", "e": "ᴇ", "f": "ꜰ",
@@ -2363,6 +2369,46 @@ async def show_task(job: TransferTask, *, target=None) -> None:
     await target.edit_text(task_detail_text(job), reply_markup=task_keyboard(job, show_manage=True))
 
 
+async def send_document_to_chat(job: TransferTask, bot_obj, part_path: Path,
+                                part_name: str, index: int, total: int) -> None:
+    """Envía una parte del archivo como documento al chat privado del usuario.
+
+    Reintenta hasta 3 veces porque la subida de documentos grandes por Bot API
+    puede cortarse; entre intentos avisa al usuario en la tarjeta de estado.
+    """
+    caption = part_name if total > 1 else ""
+    last_error: Exception | None = None
+    for attempt in range(3):
+        if job.cancel_requested:
+            raise RuntimeError("Descarga cancelada.")
+        if attempt:
+            try:
+                await job.status_message.edit_text(card("⚠️ ʀᴇɪɴᴛᴇɴᴛᴏ", [
+                    f"Parte {index + 1}/{total} no se envió.",
+                    f"Intento {attempt + 1} de 3...",
+                ]))
+            except Exception:
+                pass
+        try:
+            with part_path.open("rb") as handle:
+                await bot_obj.send_document(
+                    job.chat_id,
+                    document=handle,
+                    filename=part_name,
+                    caption=caption or None,
+                    read_timeout=600,
+                    write_timeout=3600,
+                    connect_timeout=60,
+                )
+            return
+        except Exception as exc:
+            last_error = exc
+            log.warning("Fallo enviando parte %d/%d a %s: %s",
+                        index + 1, total, job.user_id, type(exc).__name__)
+            await asyncio.sleep(3 * (attempt + 1))
+    raise RuntimeError(f"No se pudo enviar la parte {index + 1}/{total}: {type(last_error).__name__}")
+
+
 async def send_task_links(job: TransferTask, bot_obj, chat_id: int | None = None) -> None:
     target_chat = chat_id or job.chat_id
     urls = sorted(job.part_urls.items())
@@ -2596,6 +2642,9 @@ async def process_task(job: TransferTask, application: Application) -> None:
             return
 
         part_size = env_int("MAX_PART_SIZE_MIB", 1900) * MIB
+        if DELIVERY_MODE == "chat" and not application.bot_data.get("local_bot_api", False):
+            # Sin un servidor local de Bot API, el límite de documentos es 50 MiB.
+            part_size = min(part_size, BOT_API_SEND_LIMIT - 2 * MIB)
         if not job.part_paths or any(not Path(p).exists() for p in job.part_paths):
             part_dir = Path(os.getenv("TMPDIR", "/tmp")) / f"jk-task-{job.task_id}"
             parts = await asyncio.to_thread(split_into_parts, temp_path, filename, part_dir, part_size)
@@ -2620,18 +2669,25 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 part_total = 0
             if part_total:
                 try:
-                    await job.status_message.edit_text(
-                        upload_progress_text(0, part_total),
-                        reply_markup=task_keyboard(job),
-                    )
+                    await job.status_message.edit_text(card("📤 ꜱᴜʙɪᴇɴᴅᴏ", [
+                        part_name[:24],
+                        f"Parte {index + 1}/{len(job.part_paths)}",
+                    ]))
                 except Exception:
                     log.debug("No se pudo mostrar el inicio de subida %s", job.task_id, exc_info=True)
-            link, _ = await upload_to_todus_s3_with_progress(
-                job.status_message, part_path, part_name, job.user_id,
-                reply_markup=lambda: task_keyboard(job),
-                is_cancelled=lambda: job.cancel_requested,
-            )
-            job.part_urls[index] = link
+            if DELIVERY_MODE == "chat":
+                await send_document_to_chat(
+                    job, application.bot, part_path, part_name,
+                    index, len(job.part_paths),
+                )
+                job.part_urls[index] = ""
+            else:
+                link, _ = await upload_to_todus_s3_with_progress(
+                    job.status_message, part_path, part_name, job.user_id,
+                    reply_markup=lambda: task_keyboard(job),
+                    is_cancelled=lambda: job.cancel_requested,
+                )
+                job.part_urls[index] = link
             if job.cancel_requested:
                 job.set_state("paused")
                 await _edit_task_status(job, task_detail_text(job))
@@ -2652,7 +2708,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 "filename": filename,
                 "size": size,
                 "parts": len(job.part_urls),
-                "urls": [job.part_urls[i] for i in sorted(job.part_urls.keys())],
+                "urls": [job.part_urls[i] for i in sorted(job.part_urls.keys()) if job.part_urls[i]],
                 "completed_at": completed_at.isoformat(),
                 "expires_at": expires_at,
                 "storage_duration_hours": get_plan_info(get_user_plan(job.user_id)).get("storage_hours", 12),
@@ -2664,37 +2720,51 @@ async def process_task(job: TransferTask, application: Application) -> None:
 
         schedule_data_backup(application, "subida completada")
         job.set_state("done")
-        links = sorted(job.part_urls.items())
-        if len(links) == 1:
+        links = sorted((i, u) for i, u in job.part_urls.items() if u)
+        if DELIVERY_MODE == "chat":
+            final_keyboard = None
+        elif len(links) == 1:
             final_keyboard = result_keyboard(links[0][1], job.task_id)
         else:
             final_keyboard = result_multi_keyboard(job.task_id)
-        await job.status_message.edit_text(
-            transfer_complete_text(
-                filename=filename,
-                size=size,
-                parts=len(job.part_urls),
-                duration=max(0, job.updated_at - job.created_at),
-                expires_at=expires_at,
-            ),
-            reply_markup=final_keyboard,
-            disable_web_page_preview=True,
-        )
-        await publish_channel_notice(
-            application.bot,
-            "📥 ɴᴜᴇᴠᴀ ᴅᴇꜱᴄᴀʀɢᴀ",
-            [
-                f"👤 Usuario: {task_public_user_label(job)}",
+        if DELIVERY_MODE == "chat":
+            await job.status_message.edit_text(card("✅ ᴀʀᴄʜɪᴠᴏ ʟɪꜱᴛᴏ", [
+                "Ya está en este chat ☝️",
                 "",
-                "📄 Archivo:",
-                filename,
-                "",
+                f"📄 {(filename or 'archivo')[:42]}",
                 f"📦 Tamaño: {_size_label(size)}",
-                "✅ Descarga y subida",
-                "completadas correctamente.",
-            ],
-            reply_markup=channel_download_keyboard([url for _, url in links]),
-        )
+                f"🧩 Partes enviadas: {len(job.part_urls)}",
+                "",
+                "Si fueron varias partes, une con HJSplit",
+                "o el programa que prefieras.",
+            ]))
+        else:
+            await job.status_message.edit_text(
+                transfer_complete_text(
+                    filename=filename,
+                    size=size,
+                    parts=len(job.part_urls),
+                    duration=max(0, job.updated_at - job.created_at),
+                    expires_at=expires_at,
+                ),
+                reply_markup=final_keyboard,
+                disable_web_page_preview=True,
+            )
+            await publish_channel_notice(
+                application.bot,
+                "📥 ɴᴜᴇᴠᴀ ᴅᴇꜱᴄᴀʀɢᴀ",
+                [
+                    f"👤 Usuario: {task_public_user_label(job)}",
+                    "",
+                    "📄 Archivo:",
+                    filename,
+                    "",
+                    f"📦 Tamaño: {_size_label(size)}",
+                    "✅ Descarga y subida",
+                    "completadas correctamente.",
+                ],
+                reply_markup=channel_download_keyboard([url for _, url in links]),
+            )
         if temp_path:
             temp_path.unlink(missing_ok=True)
             if temp_path.parent.name.startswith("tg-platform-"):
