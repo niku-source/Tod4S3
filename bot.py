@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 from telegram import (
     BotCommand,
     CopyTextButton,
+    InputMediaPhoto,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Update,
@@ -55,6 +56,7 @@ load_dotenv()
 
 TELEGRAM_BOT_TOKEN = ""
 OWNER_TELEGRAM_ID = ""
+WELCOME_IMAGE_PATH = Path(__file__).with_name("toduss3_welcome_option_1.png")
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -1788,6 +1790,7 @@ def main_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
          InlineKeyboardButton("💬 SOPORTE", callback_data="support", style="primary")],
         [InlineKeyboardButton("📊 MI CUOTA", callback_data="my_quota", style="primary"),
          InlineKeyboardButton("🏆 TOP USUARIOS", callback_data="top:users", style="primary")],
+        [InlineKeyboardButton("ℹ️ SERVICIO TODUS S3", callback_data="service_info", style="primary")],
     ]
     if user_id is not None and is_owner(user_id):
         rows.append([InlineKeyboardButton("⚙️ PANEL DE CREADOR", callback_data="admin:open", style="primary")])
@@ -2785,6 +2788,35 @@ def welcome_text(user_id: int, user_name: str, username: str | None = None) -> s
     return card_with_credit(BOT_NAME, lines, preserve_title=True)
 
 
+async def send_welcome_message(message, user_id: int, user_name: str, username: str | None,
+                               reply_markup: InlineKeyboardMarkup, extra_text: str = "") -> None:
+    """Muestra la imagen de marca y usa la ficha textual como fallback."""
+    if WELCOME_IMAGE_PATH.is_file() and hasattr(message, "reply_photo"):
+        with WELCOME_IMAGE_PATH.open("rb") as photo:
+            await message.reply_photo(photo=photo, caption=extra_text or None, reply_markup=reply_markup)
+        return
+    await message.reply_text(
+        welcome_text(user_id, user_name, username) + extra_text,
+        reply_markup=reply_markup,
+    )
+
+
+async def edit_welcome_message(message, user_id: int, user_name: str, username: str | None,
+                               reply_markup: InlineKeyboardMarkup, extra_text: str = "") -> None:
+    """Cambia la pantalla de verificación por la imagen de marca."""
+    if WELCOME_IMAGE_PATH.is_file() and hasattr(message, "edit_media"):
+        with WELCOME_IMAGE_PATH.open("rb") as photo:
+            await message.edit_media(
+                media=InputMediaPhoto(media=photo, caption=extra_text or None),
+                reply_markup=reply_markup,
+            )
+        return
+    await message.edit_text(
+        welcome_text(user_id, user_name, username) + extra_text,
+        reply_markup=reply_markup,
+    )
+
+
 def membership_keyboard(
     channel_label: str = "Canal oficial",
     group_label: str = "Soporte",
@@ -2957,13 +2989,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         referral_notice = ""
         if await complete_pending_referral(user.id, context):
             referral_notice = "\n\n🎁 Recibiste 1 GB gratis y 5$ de bienvenida por entrar con un enlace de invitación."
-        await update.effective_message.reply_text(
-            welcome_text(
-                user.id,
-                getattr(user, "full_name", "") or getattr(user, "first_name", ""),
-                getattr(user, "username", None),
-            ) + referral_notice,
-            reply_markup=main_keyboard(user.id),
+        await send_welcome_message(
+            update.effective_message,
+            user.id,
+            getattr(user, "full_name", "") or getattr(user, "first_name", ""),
+            getattr(user, "username", None),
+            main_keyboard(user.id),
+            referral_notice,
         )
         return
     await update.effective_message.reply_text(
@@ -3067,13 +3099,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         referral_notice = ""
         if await complete_pending_referral(user.id, context):
             referral_notice = "\n\n🎁 Recibiste 1 GB gratis y 5$ de bienvenida por entrar con un enlace de invitación."
-        await query.message.edit_text(
-            welcome_text(
-                user.id,
-                getattr(user, "full_name", "") or getattr(user, "first_name", ""),
-                getattr(user, "username", None),
-            ) + referral_notice,
-            reply_markup=main_keyboard(user.id),
+        await edit_welcome_message(
+            query.message,
+            user.id,
+            getattr(user, "full_name", "") or getattr(user, "first_name", ""),
+            getattr(user, "username", None),
+            main_keyboard(user.id),
+            referral_notice,
         )
         return
     # El saldo/planes debe abrirse directamente desde la botonera principal;
@@ -3172,6 +3204,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 getattr(user, "username", None),
             ),
             reply_markup=main_keyboard(user.id),
+        )
+        return
+
+    if query.data == "service_info":
+        await query.message.edit_text(
+            welcome_text(
+                user.id,
+                getattr(user, "full_name", "") or getattr(user, "first_name", ""),
+                getattr(user, "username", None),
+            ),
+            reply_markup=InlineKeyboardMarkup([
+                [btn("🖼️ VOLVER A LA IMAGEN", callback_data="home")],
+            ]),
         )
         return
 
@@ -3911,13 +3956,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif query.data == "home":
         context.user_data.pop("admin_state", None)
         context.user_data.pop("awaiting_support", None)
-        await query.message.edit_text(
-            welcome_text(
-                user.id,
-                getattr(user, "full_name", "") or getattr(user, "first_name", ""),
-                getattr(user, "username", None),
-            ),
-            reply_markup=main_keyboard(user.id),
+        await edit_welcome_message(
+            query.message,
+            user.id,
+            getattr(user, "full_name", "") or getattr(user, "first_name", ""),
+            getattr(user, "username", None),
+            main_keyboard(user.id),
         )
 
 

@@ -253,18 +253,18 @@ class RequestedFeatureTests(unittest.TestCase):
     def test_main_keyboard_matches_reference_layout_with_inline_actions(self):
         markup = main_keyboard()
         buttons = all_buttons(markup)
-        self.assertEqual([len(row) for row in markup.inline_keyboard], [1, 1, 2, 2, 2])
+        self.assertEqual([len(row) for row in markup.inline_keyboard], [1, 1, 2, 2, 2, 1])
         self.assertEqual([button.text for button in buttons], [
             "📥 DESCARGAS", "💰 SALDO: 0$ · REFERIDOS", "❓ AYUDA", "📒 HISTORIAL",
-            "📋 COLA", "💬 SOPORTE", "📊 MI CUOTA", "🏆 TOP USUARIOS",
+            "📋 COLA", "💬 SOPORTE", "📊 MI CUOTA", "🏆 TOP USUARIOS", "ℹ️ SERVICIO TODUS S3",
         ])
         self.assertEqual([button.callback_data for button in buttons], [
             "downloads", "balance", "help:0", "open_history", "open_queue",
-            "support", "my_quota", "top:users",
+            "support", "my_quota", "top:users", "service_info",
         ])
         self.assertEqual([button.style for button in buttons], [
             "success", "primary", "primary", "primary",
-            "primary", "primary", "primary", "primary",
+            "primary", "primary", "primary", "primary", "primary",
         ])
         self.assertFalse(any(button.url for button in buttons))
 
