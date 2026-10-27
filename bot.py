@@ -424,12 +424,13 @@ def register_user(user) -> bool:
         return False
 
 
-async def publish_channel_notice(bot_obj, title: str, body: str, *, reply_markup=None) -> bool:
+async def publish_channel_notice(bot_obj, title: str, body: str | list[str], *, reply_markup=None) -> bool:
     """Publica un aviso de actividad sin exponer IDs ni enlaces privados."""
     try:
+        lines = body.splitlines() if isinstance(body, str) else body
         await bot_obj.send_message(
             chat_id=PUBLIC_CHANNEL_ID,
-            text=card(title, [body]),
+            text=card(title, lines),
             reply_markup=reply_markup,
             disable_web_page_preview=True,
         )
@@ -2587,10 +2588,16 @@ async def process_task(job: TransferTask, application: Application) -> None:
         await publish_channel_notice(
             application.bot,
             "📥 ɴᴜᴇᴠᴀ ᴅᴇꜱᴄᴀʀɢᴀ",
-            f"Usuario: {public_user_label(job.user_id)}\n"
-            f"Archivo: {filename}\n"
-            f"Tamaño: {_size_label(size)}\n"
-            "La descarga y subida se completó correctamente.",
+            [
+                f"👤 Usuario: {public_user_label(job.user_id)}",
+                "",
+                "📄 Archivo:",
+                filename,
+                "",
+                f"📦 Tamaño: {_size_label(size)}",
+                "✅ Descarga y subida",
+                "completadas correctamente.",
+            ],
             reply_markup=channel_download_keyboard([url for _, url in links]),
         )
         if temp_path:
