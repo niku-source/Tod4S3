@@ -161,7 +161,12 @@ CARD_BOT = "╰" + "━" * CARD_INNER_WIDTH + "╯"
 MONO_PATTERN = re.compile(r"\{mono:([^}]+)\}")
 
 
-def card(title: str, lines: list[str] | tuple[str, ...], preserve_title: bool = False) -> str:
+def card(
+    title: str,
+    lines: list[str] | tuple[str, ...],
+    preserve_title: bool = False,
+    preserve_lines: bool = False,
+) -> str:
     """Genera el recuadro. Usa {mono:xxxxx} para texto copiable."""
     def box_content(value: str) -> str:
         # El relleno mantiene la raya derecha alineada; si Telegram contiene
@@ -187,7 +192,7 @@ def card(title: str, lines: list[str] | tuple[str, ...], preserve_title: bool = 
 
         protected = MONO_PATTERN.sub(_save_mono, line_str)
         wrapped = textwrap.wrap(
-            sc(protected),
+            protected if preserve_lines else sc(protected),
             width=26,
             break_long_words=True,
             break_on_hyphens=False,
@@ -504,15 +509,15 @@ async def publish_channel_notice(
         if include_site_promo and PUBLIC_SITE_URL:
             lines.extend([
                 "",
-                "🌐 Web opcional para planes ilimitados.",
-                "Bot gratis por referidos.",
+                "🌐 ᴡᴇʙ ᴏᴘᴄɪᴏɴᴀʟ ᴘᴀʀᴀ ᴘʟᴀɴᴇꜱ ɪʟɪᴍɪᴛᴀᴅᴏꜱ.",
+                "ʙᴏᴛ ꜱɪɢᴜᴇ ɢʀᴀᴛɪꜱ ᴘᴏʀ ʀᴇꜰᴇʀɪᴅᴏꜱ.",
             ])
             rows = [list(row) for row in getattr(reply_markup, "inline_keyboard", [])] if reply_markup else []
             rows.append([InlineKeyboardButton("🔗 Link de la web", url=PUBLIC_SITE_URL, style="success")])
             reply_markup = InlineKeyboardMarkup(rows)
         await bot_obj.send_message(
             chat_id=PUBLIC_CHANNEL_ID,
-            text=card(title, lines),
+            text=card(title, lines, preserve_lines=True),
             reply_markup=reply_markup,
             disable_web_page_preview=True,
         )
@@ -3013,9 +3018,9 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 application.bot,
                 "📤 ᴇɴᴠíᴏ ᴄᴏᴍᴘʟᴇᴛᴀᴅᴏ",
                 [
-                    f"👤 Usuario: {task_public_user_label(job)}",
-                    f"📦 Tamaño enviado: {_size_label(size)}",
-                    "✅ Entregado por ToDus.",
+                    f"👤 ᴜꜱᴜᴀʀɪᴏ: {task_public_user_label(job)}",
+                    f"📦 ᴛᴀᴍᴀñᴏ ᴇɴᴠɪᴀᴅᴏ: {_size_label(size)}",
+                    "✅ ᴇɴᴛʀᴇɢᴀᴅᴏ ᴘᴏʀ ᴛᴏᴅᴜꜱ.",
                 ],
                 include_site_promo=True,
             )
@@ -3035,9 +3040,9 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 application.bot,
                 "📥 ɴᴜᴇᴠᴀ ᴅᴇꜱᴄᴀʀɢᴀ",
                 [
-                    f"👤 Usuario: {task_public_user_label(job)}",
-                    f"📦 Tamaño: {_size_label(size)}",
-                    "✅ Descarga completada.",
+                    f"👤 ᴜꜱᴜᴀʀɪᴏ: {task_public_user_label(job)}",
+                    f"📦 ᴛᴀᴍᴀñᴏ: {_size_label(size)}",
+                    "✅ ᴅᴇꜱᴄᴀʀɢᴀ ᴄᴏᴍᴘʟᴇᴛᴀᴅᴀ.",
                 ],
                 reply_markup=channel_download_keyboard([url for _, url in links]),
                 include_site_promo=True,
