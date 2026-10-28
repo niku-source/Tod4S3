@@ -334,6 +334,7 @@ HISTORY_DATA_FILE = os.getenv("HISTORY_DATA_FILE", str(DATA_DIR / "task_history.
 USERS_DATA_FILE = os.getenv("USERS_DATA_FILE", str(DATA_DIR / "users.json"))
 ADMIN_AUDIT_FILE = os.getenv("ADMIN_AUDIT_FILE", str(DATA_DIR / "admin_audit.json"))
 TODUS_USERS_FILE = os.getenv("TODUS_USERS_FILE", str(DATA_DIR / "todus_users.json"))
+TODUS_AUTH_FILE = os.getenv("TODUS_AUTH_FILE", str(DATA_DIR / "todus_auth.json"))
 # Telegram Bot API no mantiene una sesión local. La sesión MTProto opcional del proyecto
 # sí puede persistirse aquí para incluirla, cifrada, en la copia de seguridad.
 TELEGRAM_AUTH_DIR = DATA_DIR / "telegram_auth"
@@ -350,6 +351,7 @@ def telegram_backup_layout() -> BackupLayout:
             "users.json": USERS_DATA_FILE,
             "admin_audit.json": ADMIN_AUDIT_FILE,
             "todus_users.json": TODUS_USERS_FILE,
+            "todus_auth.json": TODUS_AUTH_FILE,
         },
     )
 
@@ -2482,16 +2484,35 @@ def set_user_todus_number(user_id: int, number: str) -> None:
         log.error("Error guardando número ToDus de %s", user_id, exc_info=True)
 
 
+def get_todus_bot_phone() -> str:
+    if TODUS_BOT_PHONE:
+        return TODUS_BOT_PHONE
+    data = _load_json(TODUS_AUTH_FILE)
+    return _normalize_todus_number(data.get("phone", "")) if isinstance(data, dict) else ""
+
+
+def persist_todus_bot_phone() -> None:
+    phone = _normalize_todus_number(TODUS_BOT_PHONE)
+    if not phone:
+        return
+    _save_json(TODUS_AUTH_FILE, {
+        "phone": phone,
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
 def get_todus_client(force_relogin: bool = False):
     """Cliente ToDus del bot, autenticado; re-login automático si caduca."""
     global _todus_client
     with _todus_client_lock:
         from todus import ToDusClient2
         if _todus_client is None:
-            if not (TODUS_BOT_PHONE and TODUS_BOT_PASSWORD):
+            phone = get_todus_bot_phone()
+            if not (phone and TODUS_BOT_PASSWORD):
                 raise RuntimeError("Falta configurar TODUS_PHONE y TODUS_PASSWORD.")
-            _todus_client = ToDusClient2(TODUS_BOT_PHONE, TODUS_BOT_PASSWORD)
+            _todus_client = ToDusClient2(phone, TODUS_BOT_PASSWORD)
             _todus_client.login()
+            persist_todus_bot_phone()
         elif force_relogin:
             _todus_client.login()
     return _todus_client
@@ -4964,6 +4985,7 @@ async def post_init(application: Application) -> None:
             log.info("Restauración inicial terminada: archivos=%d bytes=%d", restored_files, restored_bytes)
         except Exception as exc:
             log.warning("Se continúa sin restaurar la copia Telegram (%s).", type(exc).__name__)
+        persist_todus_bot_phone()
         for attempt in range(1, 4):
             try:
                 await backup_to_telegram(

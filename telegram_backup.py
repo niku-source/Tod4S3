@@ -37,6 +37,7 @@ STATE_KEYS = (
     "users.json",
     "admin_audit.json",
     "todus_users.json",
+    "todus_auth.json",
 )
 OLD_BACKUP_DIR_NAMES = {"backup", "backups", "old_backup", "old_backups", "archive", "archives"}
 
@@ -561,6 +562,7 @@ async def restore_from_telegram(
             return 0, 0
         snapshot = await _download_message(bot, pinned, bot_token)
         restored, restored_bytes = restore_snapshot(snapshot, layout)
+        _write_message_pointer(layout, getattr(pinned, "message_id", 0))
         logger.info(
             "Respaldo restaurado de Telegram: auth_path=%s archivos=%d bytes=%d "
             "restaurados=%d bytes_restaurados=%d",
@@ -686,6 +688,7 @@ async def backup_to_telegram(
         uploaded_id = getattr(uploaded, "message_id", None)
         if not uploaded_id:
             raise BackupError("Telegram no devolvió el identificador del documento subido.")
+        pin_error = None
         try:
             if hasattr(bot, "pin_chat_message"):
                 await bot.pin_chat_message(
@@ -698,33 +701,28 @@ async def backup_to_telegram(
             else:
                 raise BackupError("La conexión de Telegram no ofrece la operación de fijar mensajes.")
         except Exception as exc:
-            # No se borra la copia recién subida: los datos quedan guardados y
-            # el ID se reutiliza para reemplazarla en la siguiente actualización.
-            _write_message_pointer(layout, uploaded_id)
-            # La publicación y la validación ya terminaron correctamente. No
-            # hacemos fallar el bot entero por un permiso opcional de fijado;
-            # la copia queda visible y se podrá editar en la próxima ejecución.
+            pin_error = exc
             logger.error(
                 "Telegram no permitió fijar la copia message_id=%s (%s); "
-                "la copia quedó publicada.",
+                "se conservará una sola copia sin fijarla.",
                 uploaded_id,
                 type(exc).__name__,
             )
-            return True
         old_id_to_remove = getattr(old_message, "message_id", None) if old_message is not None else old_message_id
         if old_id_to_remove and old_id_to_remove != uploaded_id:
             try:
                 await bot.delete_message(chat_id=chat_id, message_id=old_id_to_remove)
             except Exception as exc:
                 logger.warning("La nueva copia está fijada; no se pudo borrar la anterior (%s).", type(exc).__name__)
+        _write_message_pointer(layout, uploaded_id)
         logger.info(
-            "Copia Telegram validada y fijada: message_id=%s auth_path=%s archivos=%d bytes=%d",
+            "Copia Telegram validada%s: message_id=%s auth_path=%s archivos=%d bytes=%d",
+            " y fijada" if pin_error is None else " (sin fijar)",
             uploaded_id,
             layout.auth_dir,
             file_count,
             total_bytes,
         )
-        _write_message_pointer(layout, uploaded_id)
         return True
     except BackupError as exc:
         logger.error("Copia Telegram cancelada: %s", exc)
