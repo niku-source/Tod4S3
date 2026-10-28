@@ -14,6 +14,7 @@ import tempfile
 import textwrap
 import time
 import shutil
+import subprocess
 import zipfile
 from datetime import datetime, timedelta, timezone
 from email.message import Message
@@ -1993,6 +1994,8 @@ def main_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
          InlineKeyboardButton("🏆 TOP USUARIOS", callback_data="top:users", style="primary")],
         [InlineKeyboardButton("ℹ️ SERVICIO TODUS S3", callback_data="service_info", style="primary")],
     ]
+    if user_id is not None and (is_owner(user_id) or get_user_plan(user_id) == "premium"):
+        rows.insert(1, [InlineKeyboardButton("🗜️ COMPRESOR PREMIUM", callback_data="premium:compressor", style="success")])
     if user_id is not None and is_owner(user_id):
         rows.append([InlineKeyboardButton("⚙️ PANEL DE CREADOR", callback_data="admin:open", style="primary")])
     return InlineKeyboardMarkup(rows)
@@ -2820,6 +2823,57 @@ def split_into_parts(source: Path, filename: str, work_dir: Path, part_size: int
     return result
 
 
+def compress_file_for_premium(source: Path, filename: str) -> tuple[Path, str, int, str]:
+    """Comprime un archivo y devuelve (ruta, nombre, tamaño, explicación).
+
+    El 90% es un objetivo, no una garantía: archivos ya comprimidos no pueden
+    reducirse tanto sin perder calidad o quedar más grandes.
+    """
+    original_size = source.stat().st_size
+    safe_name = clean_filename(filename, "archivo")
+    suffix = Path(safe_name).suffix.lower()
+    video = suffix in {".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".flv", ".3gp"}
+    audio = suffix in {".mp3", ".m4a", ".wav", ".flac", ".ogg", ".opus", ".aac"}
+    image = suffix in {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
+    output_dir = source.parent / f"premium-compressed-{source.stem}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if video:
+        output = output_dir / f"{Path(safe_name).stem}_comprimido.mp4"
+        command = ["ffmpeg", "-y", "-i", str(source), "-map", "0:v:0", "-map", "0:a?",
+                   "-vf", "scale='min(1280,iw)':-2", "-c:v", "libx264", "-preset", "veryfast",
+                   "-crf", "35", "-c:a", "aac", "-b:a", "64k", str(output)]
+    elif audio:
+        output = output_dir / f"{Path(safe_name).stem}_comprimido.mp3"
+        command = ["ffmpeg", "-y", "-i", str(source), "-vn", "-c:a", "libmp3lame", "-b:a", "48k", str(output)]
+    elif image:
+        output = output_dir / f"{Path(safe_name).stem}_comprimido.jpg"
+        command = ["ffmpeg", "-y", "-i", str(source), "-frames:v", "1", "-q:v", "8", str(output)]
+    else:
+        output = output_dir / f"{safe_name}.zip"
+        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as package:
+            package.write(source, arcname=safe_name)
+        if output.stat().st_size >= original_size:
+            output.unlink(missing_ok=True)
+            output_dir.rmdir()
+            return source, safe_name, original_size, "Este formato ya estaba comprimido; se enviará sin cambios."
+        compressed_size = output.stat().st_size
+        reduction = round((1 - compressed_size / original_size) * 100) if original_size else 0
+        return output, output.name, compressed_size, f"Reducción lograda: {reduction}% (objetivo: hasta 90%)."
+    try:
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=1800)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        output.unlink(missing_ok=True)
+        shutil.rmtree(output_dir, ignore_errors=True)
+        raise RuntimeError(f"No se pudo comprimir el archivo ({type(exc).__name__}).") from exc
+    compressed_size = output.stat().st_size
+    if compressed_size >= original_size:
+        output.unlink(missing_ok=True)
+        shutil.rmtree(output_dir, ignore_errors=True)
+        return source, safe_name, original_size, "El archivo ya estaba optimizado; se enviará sin cambios."
+    reduction = round((1 - compressed_size / original_size) * 100) if original_size else 0
+    return output, output.name, compressed_size, f"Reducción lograda: {reduction}% (objetivo: hasta 90%)."
+
+
 async def _edit_task_status(job: TransferTask, text: str) -> None:
     try:
         await job.status_message.edit_text(text, reply_markup=task_keyboard(job))
@@ -2828,7 +2882,8 @@ async def _edit_task_status(job: TransferTask, text: str) -> None:
 
 
 async def enqueue_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE, *,
-                           source_kind: str, source_url: str | None = None) -> None:
+                           source_kind: str, source_url: str | None = None,
+                           compress_after_download: bool = False) -> None:
     message, user = update.effective_message, update.effective_user
     if not message or not user:
         return
@@ -2840,6 +2895,7 @@ async def enqueue_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE, *
         source_message=message, status_message=placeholder, source_url=source_url,
         username=f"@{user.username}" if user.username else None,
         display_name=getattr(user, "full_name", None),
+        compress_after_download=compress_after_download,
     )
     manager: FairTaskQueue = context.application.bot_data["task_queue"]
     if not await manager.enqueue(job, get_user_queue_limit(user.id)):
@@ -2955,6 +3011,22 @@ async def process_task(job: TransferTask, application: Application) -> None:
             filename, size = job.filename or temp_path.name, job.size or temp_path.stat().st_size
 
         validate_downloaded_file(temp_path, filename)
+        quota_size = size
+        compression_note = ""
+        if job.compress_after_download:
+            await _edit_task_status(job, card("🗜️ ᴄᴏᴍᴘʀɪᴍɪᴇɴᴅᴏ", [
+                (filename or "archivo")[:42],
+                "Intentando reducirlo hasta un 90%...",
+            ]))
+            original_path = temp_path
+            compressed_path, filename, size, compression_note = await asyncio.to_thread(
+                compress_file_for_premium, original_path, filename or "archivo"
+            )
+            if compressed_path != original_path:
+                original_path.unlink(missing_ok=True)
+                temp_path = compressed_path
+                job.temp_path = str(compressed_path)
+            job.filename, job.size = filename, size
 
         if max_bytes and size > max_bytes and not is_owner(job.user_id):
             temp_path.unlink(missing_ok=True)
@@ -2963,7 +3035,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
             job.temp_path = None
             raise ValueError(f"Supera {_size_label(max_bytes, 0)}")
 
-        ok, err_msg = reserve_data_quota(application, job.user_id, job.task_id, size)
+        ok, err_msg = reserve_data_quota(application, job.user_id, job.task_id, quota_size)
         if not ok:
             job.error = "Cuota agotada"
             job.set_state("error")
@@ -2979,8 +3051,9 @@ async def process_task(job: TransferTask, application: Application) -> None:
             await _edit_task_status(job, task_detail_text(job))
             return
 
+        force_chat_delivery = job.compress_after_download
         part_size = env_int("MAX_PART_SIZE_MIB", 1900) * MIB
-        if DELIVERY_MODE == "chat" and not application.bot_data.get("local_bot_api", False):
+        if (DELIVERY_MODE == "chat" or force_chat_delivery) and not application.bot_data.get("local_bot_api", False):
             # Sin un servidor local de Bot API, el límite de documentos es 50 MiB.
             part_size = min(part_size, BOT_API_SEND_LIMIT - 2 * MIB)
         if DELIVERY_MODE == "todus":
@@ -3016,7 +3089,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
                     ]))
                 except Exception:
                     log.debug("No se pudo mostrar el inicio de subida %s", job.task_id, exc_info=True)
-            if DELIVERY_MODE == "chat":
+            if DELIVERY_MODE == "chat" or force_chat_delivery:
                 await send_document_to_chat(
                     job, application.bot, part_path, part_name,
                     index, len(job.part_paths),
@@ -3055,7 +3128,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 return
 
         try:
-            add_daily_usage(job.user_id, size)
+            add_daily_usage(job.user_id, quota_size)
         except Exception as e:
             log.error(f"Error no crítico al actualizar cuota: {e}")
 
@@ -3082,19 +3155,20 @@ async def process_task(job: TransferTask, application: Application) -> None:
         schedule_data_backup(application, "subida completada")
         job.set_state("done")
         links = sorted((i, u) for i, u in job.part_urls.items() if u)
-        if DELIVERY_MODE == "chat":
+        if DELIVERY_MODE == "chat" or force_chat_delivery:
             final_keyboard = None
         elif len(links) == 1:
             final_keyboard = result_keyboard(links[0][1], job.task_id)
         else:
             final_keyboard = result_multi_keyboard(job.task_id)
-        if DELIVERY_MODE == "chat":
+        if DELIVERY_MODE == "chat" or force_chat_delivery:
             await job.status_message.edit_text(card("✅ ᴀʀᴄʜɪᴠᴏ ʟɪꜱᴛᴏ", [
                 "Ya está en este chat ☝️",
                 "",
                 f"📄 {(filename or 'archivo')[:42]}",
                 f"📦 Tamaño: {_size_label(size)}",
                 f"🧩 Partes enviadas: {len(job.part_urls)}",
+                *( [f"🗜️ {compression_note}"] if compression_note else [] ),
                 "",
                 "Si fueron varias partes, une con HJSplit",
                 "o el programa que prefieras.",
@@ -3150,6 +3224,8 @@ async def process_task(job: TransferTask, application: Application) -> None:
         if temp_path:
             temp_path.unlink(missing_ok=True)
             if temp_path.parent.name.startswith("tg-platform-"):
+                shutil.rmtree(temp_path.parent, ignore_errors=True)
+            elif temp_path.parent.name.startswith("premium-compressed-"):
                 shutil.rmtree(temp_path.parent, ignore_errors=True)
             job.temp_path = None
         if job.part_paths and len(job.part_paths) > 1:
@@ -3748,6 +3824,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.message.reply_text(blocked_user_text())
         return
     register_user(user)
+    if query.data == "premium:compressor":
+        if not (is_owner(user.id) or get_user_plan(user.id) == "premium"):
+            await query.answer(sc("Esta herramienta es exclusiva de Premium."), show_alert=True)
+            return
+        context.user_data["premium_compress_mode"] = True
+        await query.answer()
+        await edit_query_message_text(
+            query.message,
+            card("🗜️ ᴄᴏᴍᴘʀᴇꜱᴏʀ ᴘʀᴇᴍɪᴜᴍ", [
+                "Envía o reenvía ahora un",
+                "archivo, video, audio o foto.",
+                "También puedes enviar un enlace",
+                "de YouTube u otra plataforma.",
+                "",
+                "Intentaré reducirlo hasta un 90%",
+                "cuando el formato lo permita y",
+                "te lo devolveré en este mismo chat.",
+            ]),
+            reply_markup=home_keyboard(),
+        )
+        return
     if query.data == "todus:register":
         context.user_data["awaiting_todus_number"] = True
         await query.answer()
@@ -5196,11 +5293,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     except ValueError as exc:
         await message.reply_text(sc(str(exc)))
         return
-    if DELIVERY_MODE == "todus" and not get_user_todus_number(user.id):
+    if DELIVERY_MODE == "todus" and not context.user_data.get("premium_compress_mode") and not get_user_todus_number(user.id):
         await require_todus_number(update, context)
         return
+    compress_mode = bool(context.user_data.pop("premium_compress_mode", False))
+    if compress_mode and not (is_owner(user.id) or get_user_plan(user.id) == "premium"):
+        await message.reply_text(sc("El Compresor Premium es exclusivo de Premium."))
+        return
     for source_url in source_urls:
-        await enqueue_transfer(update, context, source_kind="url", source_url=source_url)
+        await enqueue_transfer(
+            update, context, source_kind="url", source_url=source_url,
+            compress_after_download=compress_mode,
+        )
 
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -5220,7 +5324,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if allowed and user.id not in allowed and not is_owner(user.id):
         await message.reply_text(sc("Bot limitado a usuarios autorizados."))
         return
-    if DELIVERY_MODE == "todus" and not get_user_todus_number(user.id):
+    if DELIVERY_MODE == "todus" and not context.user_data.get("premium_compress_mode") and not get_user_todus_number(user.id):
         await require_todus_number(update, context)
         return
     size_hint = None
@@ -5241,7 +5345,14 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if not ok:
             await message.reply_text(err_msg, reply_markup=quota_exhausted_keyboard())
             return
-    await enqueue_transfer(update, context, source_kind="media")
+    compress_mode = bool(context.user_data.pop("premium_compress_mode", False))
+    if compress_mode and not (is_owner(user.id) or get_user_plan(user.id) == "premium"):
+        await message.reply_text(sc("El Compresor Premium es exclusivo de Premium."))
+        return
+    await enqueue_transfer(
+        update, context, source_kind="media",
+        compress_after_download=compress_mode,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════
