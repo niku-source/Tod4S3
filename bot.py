@@ -2165,7 +2165,7 @@ def download_prompt_text(source: str) -> str:
             "",
             "📲 El archivo se enviará a tu chat de ToDus.",
             "Incluye videos de YouTube y otros enlaces.",
-            "Si aún no lo hiciste, pulsa Registrar número ToDus.",
+            "Puedes registrar o cambiar tu número ToDus.",
         ]
     if source == "telegram":
         return card("📁 ᴍᴏᴅᴏ ᴛᴇʟᴇɢʀᴀᴍ", [
@@ -2187,10 +2187,11 @@ def download_prompt_text(source: str) -> str:
     ])
 
 
-def download_prompt_keyboard() -> InlineKeyboardMarkup:
+def download_prompt_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
     rows = []
     if DELIVERY_MODE == "todus":
-        rows.append([btn("📱 ʀᴇɢɪꜱᴛʀᴀʀ ɴúᴍᴇʀᴏ ᴛᴏᴅᴜꜱ", callback_data="todus:register")])
+        label = "📱 ᴄᴀᴍʙɪᴀʀ ɴúᴍᴇʀᴏ ᴛᴏᴅᴜꜱ" if user_id and get_user_todus_number(user_id) else "📱 ʀᴇɢɪꜱᴛʀᴀʀ ɴúᴍᴇʀᴏ ᴛᴏᴅᴜꜱ"
+        rows.append([btn(label, callback_data="todus:register")])
     rows.append([
         btn("⬅️ ᴀᴛʀáꜱ", callback_data="downloads"),
         btn("🏠 ʜᴏᴍᴇ", callback_data="home"),
@@ -4671,7 +4672,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if query.data in {"download:telegram", "download:url"}:
         source = query.data.split(":", 1)[1]
-        await edit_query_message_text(query.message, download_prompt_text(source), reply_markup=download_prompt_keyboard())
+        await edit_query_message_text(
+            query.message,
+            download_prompt_text(source),
+            reply_markup=download_prompt_keyboard(user.id),
+        )
         return
 
     if query.data == "open_queue":
