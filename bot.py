@@ -2707,6 +2707,27 @@ def persist_todus_bot_phone() -> None:
     })
 
 
+def _login_todus_with_retry(client, attempts: int = 3) -> None:
+    """Reintenta el login ante caídas temporales de auth.todus.cu."""
+    last_error = None
+    for attempt in range(max(1, attempts)):
+        try:
+            client.login()
+            return
+        except Exception as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                delay = min(12, 2 ** (attempt + 1))
+                log.warning(
+                    "Login ToDus no disponible; reintento %d/%d en %ss (%s).",
+                    attempt + 2, attempts, delay, type(exc).__name__,
+                )
+                time.sleep(delay)
+    raise RuntimeError(
+        "ToDus no está disponible temporalmente. Espera unos segundos y vuelve a intentar."
+    ) from last_error
+
+
 def get_todus_client(force_relogin: bool = False):
     """Cliente ToDus del bot, autenticado; re-login automático si caduca."""
     global _todus_client
@@ -2717,10 +2738,10 @@ def get_todus_client(force_relogin: bool = False):
             if not (phone and TODUS_BOT_PASSWORD):
                 raise RuntimeError("Falta configurar TODUS_PHONE y TODUS_PASSWORD.")
             _todus_client = ToDusClient2(phone, TODUS_BOT_PASSWORD)
-            _todus_client.login()
+            _login_todus_with_retry(_todus_client)
             persist_todus_bot_phone()
         elif force_relogin:
-            _todus_client.login()
+            _login_todus_with_retry(_todus_client)
     return _todus_client
 
 
@@ -3274,6 +3295,8 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 )
             elif "HTTP 502" in error_text:
                 error_text = "HTTP 502: el servidor del enlace no está disponible ahora; prueba con otro enlace directo."
+            elif "ToDus no está disponible temporalmente" in error_text or "auth.todus.cu" in error_text:
+                error_text = "ToDus está temporalmente fuera de servicio. Espera unos segundos y vuelve a intentarlo."
             job.error = error_text[:200]
             job.set_state("error")
         await _edit_task_status(job, task_detail_text(job))
