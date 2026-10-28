@@ -496,7 +496,7 @@ async def publish_channel_notice(
     body: str | list[str],
     *,
     reply_markup=None,
-    include_site_promo: bool = False,
+    include_site_promo: bool = True,
 ) -> bool:
     """Publica un aviso de actividad sin exponer IDs ni enlaces privados."""
     try:
@@ -504,9 +504,10 @@ async def publish_channel_notice(
         if include_site_promo and PUBLIC_SITE_URL:
             lines.extend([
                 "",
-                "🌐 También contamos con nuestra página web:",
+                "🌐 Ahora tenemos nuestra propia web:",
                 PUBLIC_SITE_URL,
-                "El bot sigue siendo gratis; los planes Premium ilimitados son opcionales.",
+                "Si quieres adquirir un plan ilimitado, puedes hacerlo allí.",
+                "El bot sigue siendo totalmente gratis y funciona por referidos.",
             ])
         await bot_obj.send_message(
             chat_id=PUBLIC_CHANNEL_ID,
