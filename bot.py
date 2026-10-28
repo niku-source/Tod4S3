@@ -2697,14 +2697,27 @@ def get_todus_bot_phone() -> str:
     return _normalize_todus_number(data.get("phone", "")) if isinstance(data, dict) else ""
 
 
-def persist_todus_bot_phone() -> None:
+def persist_todus_auth(client=None) -> None:
     phone = _normalize_todus_number(TODUS_BOT_PHONE)
     if not phone:
         return
-    _save_json(TODUS_AUTH_FILE, {
+    auth_data = {
         "phone": phone,
         "saved_at": datetime.now(timezone.utc).isoformat(),
-    })
+    }
+    token = str(getattr(client, "token", "") or "") if client is not None else ""
+    if token:
+        auth_data["token"] = token
+    _save_json(TODUS_AUTH_FILE, auth_data)
+    try:
+        Path(TODUS_AUTH_FILE).chmod(0o600)
+    except OSError:
+        pass
+
+
+# Compatibilidad para llamadas antiguas del proyecto.
+def persist_todus_bot_phone() -> None:
+    persist_todus_auth()
 
 
 def _login_todus_with_retry(client, attempts: int = 3) -> None:
@@ -2738,10 +2751,17 @@ def get_todus_client(force_relogin: bool = False):
             if not (phone and TODUS_BOT_PASSWORD):
                 raise RuntimeError("Falta configurar TODUS_PHONE y TODUS_PASSWORD.")
             _todus_client = ToDusClient2(phone, TODUS_BOT_PASSWORD)
-            _login_todus_with_retry(_todus_client)
-            persist_todus_bot_phone()
+            saved_auth = _load_json(TODUS_AUTH_FILE)
+            saved_token = saved_auth.get("token", "") if isinstance(saved_auth, dict) else ""
+            if saved_token:
+                _todus_client._token = str(saved_token)
+                log.info("Sesión ToDus reutilizada desde el respaldo local.")
+            else:
+                _login_todus_with_retry(_todus_client)
+                persist_todus_auth(_todus_client)
         elif force_relogin:
             _login_todus_with_retry(_todus_client)
+            persist_todus_auth(_todus_client)
     return _todus_client
 
 
