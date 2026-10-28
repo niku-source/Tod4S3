@@ -2161,6 +2161,11 @@ def transfer_complete_text(filename: str = "", size: int = 0, parts: int = 1,
 # ═══════════════════════════════════════════════════════════════
 def admin_panel_text() -> str:
     lines = [
+        "Activación manual de compras:",
+        "Revisa primero el comprobante",
+        "enviado por el usuario y luego",
+        "asigna el plan desde estos botones.",
+        "",
         "Datos y saldo virtual:",
         "",
         "🎁 Registro: 1 GB gratis y 5$.",
@@ -2171,7 +2176,7 @@ def admin_panel_text() -> str:
         "Los roles VIP siguientes son manuales",
         "y no sustituyen los paquetes de datos.",
         "",
-        "Selecciona una acción:",
+        "Selecciona el plan comprado:",
     ]
     box = card("⚙️ ᴘᴀɴᴇʟ ᴅᴇ ᴀᴅᴍɪɴ", lines)
     return f"{box}\n\n{BOT_FOOTER}"
@@ -2180,10 +2185,10 @@ def admin_panel_text() -> str:
 def admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [btn("💰 ᴅᴀʀ ꜱᴀʟᴅᴏ ᴀ ᴜɴ ɪᴅ", callback_data="admin:balance")],
-        [btn("🆓 ᴅᴀʀ ɢʀᴀᴛɪꜱ", callback_data="admin:plan:free")],
-        [btn("⭐ ᴀꜱɪɢɴᴀʀ ᴠɪᴘ ʙáꜱɪᴄᴏ", callback_data="admin:plan:vip_basic")],
-        [btn("💎 ᴀꜱɪɢɴᴀʀ ᴠɪᴘ ᴍᴇᴅɪᴏ", callback_data="admin:plan:vip_medium")],
-        [btn("👑 ᴀꜱɪɢɴᴀʀ ᴘʀᴇᴍɪᴜᴍ", callback_data="admin:plan:premium")],
+        [btn("🆓 ᴀᴄᴛɪᴠᴀʀ ɢʀᴀᴛɪꜱ", callback_data="admin:plan:free")],
+        [btn("⭐ ᴀᴄᴛɪᴠᴀʀ ᴠɪᴘ ʙáꜱɪᴄᴏ", callback_data="admin:plan:vip_basic")],
+        [btn("💎 ᴀᴄᴛɪᴠᴀʀ ᴠɪᴘ ᴍᴇᴅɪᴏ", callback_data="admin:plan:vip_medium")],
+        [btn("👑 ᴀᴄᴛɪᴠᴀʀ ᴘʀᴇᴍɪᴜᴍ · 15 ᴅíᴀꜱ / 250 ᴄᴜᴘ", callback_data="admin:plan:premium")],
         [btn("🔍 ᴄᴏɴꜱᴜʟᴛᴀʀ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:check")],
         [btn("👥 ᴜꜱᴜᴀʀɪᴏꜱ ʀᴇɢɪꜱᴛʀᴀᴅᴏꜱ", callback_data="admin:users:0")],
         [btn("🗂️ ʜɪꜱᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:user_history")],
@@ -2222,15 +2227,14 @@ def admin_duration_keyboard(plan_key: str) -> InlineKeyboardMarkup:
 
 def admin_tutorial_text() -> str:
     lines = [
-        "Cómo dar planes:",
+        "Cómo activar una compra verificada:",
         "",
-        "1️⃣ Selecciona el plan",
-        "   (Básico, Medio, Premium)",
+        "1️⃣ Revisa en tu chat privado",
+        "   la captura del comprobante.",
         "",
-        "2️⃣ Elige el tiempo:",
-        "   - 1 Mes (30 días)",
-        "   - 1 Año (365 días)",
-        "   - O Personalizado",
+        "2️⃣ Selecciona el plan comprado",
+        "   y el tiempo correspondiente.",
+        "   Premium: 15 días / 250 CUP.",
         "",
         "3️⃣ Envía el ID del",
         "   usuario de Telegram.",
