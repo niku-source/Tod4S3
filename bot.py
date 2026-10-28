@@ -2287,10 +2287,18 @@ def admin_section_keyboard(section: str) -> InlineKeyboardMarkup:
 
 def admin_premium_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [btn("👑 15 ᴅíᴀꜱ · 250 ᴄᴜᴘ · ꜱᴀʟᴅᴏ ᴍóᴠɪʟ", callback_data="admin:premium_offer:15")],
-        [btn("👑 20 ᴅíᴀꜱ · 300 ᴄᴜᴘ · ꜱᴀʟᴅᴏ ᴍóᴠɪʟ", callback_data="admin:premium_offer:20")],
-        [btn("👑 30 ᴅíᴀꜱ · 500 ᴄᴜᴘ · ꜱᴀʟᴅᴏ ᴍóᴠɪʟ", callback_data="admin:premium_offer:30")],
+        [btn("👑 15 ᴅíᴀꜱ · 250 ᴄᴜᴘ", callback_data="admin:premium_offer:15")],
+        [btn("👑 20 ᴅíᴀꜱ · 300 ᴄᴜᴘ", callback_data="admin:premium_offer:20")],
+        [btn("👑 30 ᴅíᴀꜱ · 500 ᴄᴜᴘ", callback_data="admin:premium_offer:30")],
         [btn("⬅️ ᴠᴏʟᴠᴇʀ ᴀʟ ᴘᴀɴᴇʟ", callback_data="admin:back")],
+    ])
+
+
+def admin_payment_method_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("💳 ᴛʀᴀɴꜱꜰᴇʀᴍóᴠɪʟ", callback_data="admin:payment:transfer")],
+        [btn("📱 ꜱᴀʟᴅᴏ ᴍóᴠɪʟ", callback_data="admin:payment:saldo")],
+        [btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")],
     ])
 
 
@@ -2327,7 +2335,7 @@ def admin_tutorial_text() -> str:
         "   15 días / 250 CUP",
         "   20 días / 300 CUP",
         "   30 días / 500 CUP",
-        "   Todo por saldo móvil.",
+        "   Transfermóvil o saldo móvil.",
         "",
         "3️⃣ Envía el ID del",
         "   usuario de Telegram.",
@@ -3847,7 +3855,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await edit_query_message_text(query.message,
                 card("🧾 ᴘʟᴀɴᴇꜱ ᴅᴇ ᴄᴏᴍᴘʀᴀᴅᴏʀᴇꜱ", [
                     "Revisa primero la captura",
-                    "del pago en saldo móvil.",
+                    "del pago por Transfermóvil",
+                    "o saldo móvil.",
                     "",
                     "Después selecciona la oferta",
                     "y escribe el ID del usuario.",
@@ -4180,9 +4189,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "Plan: 👑 Premium",
                 "Descargas: Sin límite",
                 f"Duración: {days} días",
-                f"Precio: {prices[days]} en saldo móvil",
+                f"Precio: {prices[days]}",
                 "",
                 "Verifica la captura del pago",
+                "(Transfermóvil o saldo móvil)",
                 "y envía el ID de Telegram",
                 "del usuario que compró.",
             ]
@@ -4230,6 +4240,42 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             return
 
+        if query.data.startswith("admin:payment:"):
+            payment_key = query.data.split(":", 2)[2]
+            payment_method = {"transfer": "Transfermóvil", "saldo": "Saldo móvil"}.get(payment_key)
+            admin_state = context.user_data.get("admin_state", {})
+            if not payment_method or admin_state.get("step") != "awaiting_payment_method":
+                await query.answer(sc("Selección caducada; inicia la activación otra vez."), show_alert=True)
+                return
+            admin_state["payment_method"] = payment_method
+            admin_state["step"] = "awaiting_plan_confirmation"
+            plan_key = admin_state["plan"]
+            days = int(admin_state.get("days", 0))
+            target_id = int(admin_state["target_id"])
+            custom_name = str(admin_state.get("custom_name") or "Usuario").strip()
+            plan = get_plan_info(plan_key)
+            offer_prices = {15: 250, 20: 300, 30: 500}
+            price_cup = offer_prices.get(days) if plan_key == "premium" else None
+            lines = [
+                f"Nombre: {custom_name}",
+                f"Usuario: {{mono:{target_id}}}",
+                f"Plan: {plan['badge']} {plan['display']}",
+                f"Duración: {f'{days} días' if days > 0 else 'Permanente'}",
+                f"Cuota: {plan['daily_label']}/día",
+                f"Pago: {payment_method}",
+            ]
+            if price_cup is not None:
+                lines.append(f"Precio: {price_cup} CUP")
+            lines += ["", "¿Confirmar activación y aviso al canal?"]
+            await edit_query_message_text(query.message,
+                card("✅ ᴄᴏɴꜰɪʀᴍᴀʀ ᴄᴏᴍᴘʀᴀ", lines),
+                reply_markup=InlineKeyboardMarkup([
+                    [btn("✅ ᴄᴏɴꜰɪʀᴍᴀʀ", callback_data=f"admin:confirm_plan:{plan_key}:{days}:{target_id}")],
+                    [btn("❌ ᴄᴀɴᴄᴇʟᴀʀ", callback_data="admin:back")],
+                ]),
+            )
+            return
+
         if query.data.startswith("admin:confirm_plan:"):
             parts = query.data.split(":")
             plan_key = parts[2]
@@ -4239,6 +4285,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             custom_name = str(admin_state.get("custom_name") or "").strip()[:80]
             if not custom_name:
                 custom_name = f"Usuario {target_id}"
+            payment_method = str(admin_state.get("payment_method") or "Saldo móvil").strip()
             context.user_data.pop("admin_state", None)
 
             entry = set_user_plan(target_id, plan_key, days if days > 0 else None, custom_name=custom_name)
@@ -4250,7 +4297,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 plan_key,
                 days if days > 0 else None,
                 price_cup=price_cup,
-                payment_method="saldo móvil" if price_cup is not None else None,
+                payment_method=payment_method if price_cup is not None else None,
                 custom_name=custom_name,
             )
             schedule_data_backup(context.application, "cambio de plan")
@@ -4263,7 +4310,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 f"Plan: {plan['badge']} {plan['display']}",
                 f"Cuota: {plan['daily_label']}/día",
                 f"Duración: {f'{days} días' if days > 0 else 'Permanente'}",
+                f"Pago: {payment_method}",
             ]
+            if price_cup is not None:
+                lines_admin.append(f"Precio: {price_cup} CUP")
             if exp_date:
                 lines_admin.append(f"Vence: {exp_date}")
             lines_admin.append("")
@@ -4273,6 +4323,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 card("✅ ᴘʟᴀɴ ᴀꜱɪɢɴᴀᴅᴏ", lines_admin),
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
             )
+
+            if plan_key == "premium":
+                channel_lines = [
+                    f"👤 ᴄᴏᴍᴘʀᴀᴅᴏʀ: {custom_name}",
+                    f"🆔 ɪᴅ: {target_id}",
+                    f"👑 ᴘʟᴀɴ: {plan['display']}",
+                    f"📅 ᴅᴜʀᴀᴄɪóɴ: {f'{days} días' if days > 0 else 'Permanente'}",
+                    "∞ ᴅᴇꜱᴄᴀʀɢᴀꜱ ꜱɪɴ ʟíᴍɪᴛ",
+                    "📦 ᴇɴᴛʀᴇɢᴀ ᴅɪʀᴇᴄᴛᴀ ᴘᴏʀ ᴛᴏᴅᴜꜱ",
+                    f"💳 ᴘᴀɢᴏ: {payment_method}",
+                    f"💰 ᴘʀᴇᴄɪᴏ: {price_cup} CUP",
+                ]
+                await publish_channel_notice(
+                    context.bot,
+                    "💰 ᴘʟᴀɴ ᴘʀᴇᴍɪᴜᴍ ᴀᴄᴛɪᴠᴀᴅᴏ",
+                    channel_lines,
+                )
 
             try:
                 user_msg_lines = [
@@ -4956,28 +5023,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             plan_key = admin_state["plan"]
             days = admin_state.get("days", 0)
             context.user_data["admin_state"] = {
-                "step": "awaiting_plan_confirmation",
+                "step": "awaiting_payment_method",
                 "plan": plan_key,
                 "days": days,
                 "target_id": target_id,
                 "custom_name": custom_name,
             }
-            plan = get_plan_info(plan_key)
-            lines = [
-                f"Nombre: {custom_name}",
-                f"Usuario: {{mono:{target_id}}}",
-                f"Plan: {plan['badge']} {plan['display']}",
-                f"Duración: {f'{days} días' if days > 0 else 'Permanente'}",
-                f"Cuota: {plan['daily_label']}/día",
-                "",
-                "¿Confirmar asignación?",
-            ]
             await message.reply_text(
-                card("✅ ᴄᴏɴꜰɪʀᴍᴀʀ", lines),
-                reply_markup=InlineKeyboardMarkup([
-                    [btn("✅ ᴄᴏɴꜰɪʀᴍᴀʀ", callback_data=f"admin:confirm_plan:{plan_key}:{days}:{target_id}")],
-                    [btn("❌ ᴄᴀɴᴄᴇʟᴀʀ", callback_data="admin:back")],
+                card("💳 ᴍéᴛᴏᴅᴏ ᴅᴇ ᴘᴀɢᴏ", [
+                    f"Nombre: {custom_name}",
+                    f"ID: {{mono:{target_id}}}",
+                    "",
+                    "¿Cómo realizó el pago",
+                    "este comprador?",
                 ]),
+                reply_markup=admin_payment_method_keyboard(),
             )
             return
 
