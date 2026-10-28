@@ -787,7 +787,7 @@ def get_plan_expiry_info(user_id: int) -> tuple[str | None, int | None]:
         return None, None
 
 
-def set_user_plan(user_id: int, plan_key: str, days: int | None = None) -> dict:
+def set_user_plan(user_id: int, plan_key: str, days: int | None = None, custom_name: str | None = None) -> dict:
     now = datetime.now(timezone.utc)
     entry = {
         "plan": plan_key,
@@ -797,6 +797,8 @@ def set_user_plan(user_id: int, plan_key: str, days: int | None = None) -> dict:
         expires = now + timedelta(days=days)
         entry["expires_at"] = expires.isoformat()
         entry["duration_days"] = days
+    if custom_name:
+        entry["custom_name"] = custom_name[:80]
     try:
         data = _load_json(PLAN_DATA_FILE)
         data[str(user_id)] = entry
@@ -815,6 +817,7 @@ def record_admin_audit(
     *,
     price_cup: int | None = None,
     payment_method: str | None = None,
+    custom_name: str | None = None,
 ) -> None:
     """Añade una entrada al reporte sin borrar las asignaciones anteriores."""
     try:
@@ -834,6 +837,8 @@ def record_admin_audit(
             events[0]["price_cup"] = int(price_cup)
         if payment_method:
             events[0]["payment_method"] = payment_method
+        if custom_name:
+            events[0]["custom_name"] = custom_name[:80]
         data["events"] = events[:500]
         _save_json(ADMIN_AUDIT_FILE, data)
     except Exception as exc:
@@ -851,6 +856,9 @@ def admin_report_text() -> str:
         purchase = ""
         if event.get("price_cup") is not None:
             purchase = f" · {event.get('price_cup')} CUP · {event.get('payment_method', 'pago')}"
+        custom_name = str(event.get("custom_name") or "").strip()
+        if custom_name:
+            lines.append(f"ɴᴏᴍʙʀᴇ: {custom_name}")
         lines.append(f"ᴜꜱᴜᴀʀɪᴏ: {event.get('target_id', '?')} · {when}{purchase}")
         lines.append("")
     if not events:
@@ -4224,9 +4232,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             plan_key = parts[2]
             days = int(parts[3])
             target_id = int(parts[4])
+            admin_state = context.user_data.get("admin_state", {})
+            custom_name = str(admin_state.get("custom_name") or "").strip()[:80]
+            if not custom_name:
+                custom_name = f"Usuario {target_id}"
             context.user_data.pop("admin_state", None)
 
-            entry = set_user_plan(target_id, plan_key, days if days > 0 else None)
+            entry = set_user_plan(target_id, plan_key, days if days > 0 else None, custom_name=custom_name)
             offer_prices = {15: 250, 20: 300, 30: 500}
             price_cup = offer_prices.get(days) if plan_key == "premium" else None
             record_admin_audit(
@@ -4236,12 +4248,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 days if days > 0 else None,
                 price_cup=price_cup,
                 payment_method="saldo móvil" if price_cup is not None else None,
+                custom_name=custom_name,
             )
             schedule_data_backup(context.application, "cambio de plan")
             plan = get_plan_info(plan_key)
             exp_date, _ = get_plan_expiry_info(target_id)
 
             lines_admin = [
+                f"Nombre: {custom_name}",
                 f"Usuario: {{mono:{target_id}}}",
                 f"Plan: {plan['badge']} {plan['display']}",
                 f"Cuota: {plan['daily_label']}/día",
@@ -4907,8 +4921,47 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 return
             plan_key = admin_state["plan"]
             days = admin_state.get("days", 0)
+            context.user_data["admin_state"] = {
+                "step": "awaiting_custom_name",
+                "plan": plan_key,
+                "days": days,
+                "target_id": target_id,
+            }
+            await message.reply_text(
+                card("🏷️ ɴᴏᴍʙʀᴇ ᴘᴇʀꜱᴏɴᴀʟɪᴢᴀᴅᴏ", [
+                    f"ID: {{mono:{target_id}}}",
+                    "",
+                    "Escribe un nombre para",
+                    "identificar a este comprador",
+                    "en tu panel y reporte.",
+                    "",
+                    "Ejemplo: Cliente de Camagüey",
+                ]),
+                reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
+            )
+            return
+
+        if step == "awaiting_custom_name":
+            custom_name = text.strip()[:80]
+            if not custom_name:
+                await message.reply_text(
+                    card("❌ ɴᴏᴍʙʀᴇ ᴠᴀᴄíᴏ", ["Escribe un nombre personalizado válido."]),
+                    reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
+                )
+                return
+            target_id = int(admin_state["target_id"])
+            plan_key = admin_state["plan"]
+            days = admin_state.get("days", 0)
+            context.user_data["admin_state"] = {
+                "step": "awaiting_plan_confirmation",
+                "plan": plan_key,
+                "days": days,
+                "target_id": target_id,
+                "custom_name": custom_name,
+            }
             plan = get_plan_info(plan_key)
             lines = [
+                f"Nombre: {custom_name}",
                 f"Usuario: {{mono:{target_id}}}",
                 f"Plan: {plan['badge']} {plan['display']}",
                 f"Duración: {f'{days} días' if days > 0 else 'Permanente'}",
