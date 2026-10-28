@@ -2,13 +2,19 @@
 from __future__ import annotations
 
 import mimetypes
+import json
 import os
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
-from urllib.parse import unquote, urlsplit
+from threading import Lock, Thread
+from urllib.parse import parse_qs, unquote, urlsplit
 
 WEB_ROOT = Path(__file__).resolve().parent / "web"
+SITE_STARTED_AT = time.time()
+_VISITOR_LOCK = Lock()
+_VISITOR_LAST_SEEN: dict[str, float] = {}
+_TOTAL_VISITS = 0
 
 
 class StoreHandler(SimpleHTTPRequestHandler):
@@ -16,7 +22,34 @@ class StoreHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
 
     def do_GET(self):  # noqa: N802
-        path = urlsplit(unquote(self.path)).path
+        parsed = urlsplit(unquote(self.path))
+        path = parsed.path
+        if path == "/api/site-stats":
+            visitor = parse_qs(parsed.query).get("visitor", [""])[0][:96]
+            now = time.time()
+            global _TOTAL_VISITS, _VISITOR_LAST_SEEN
+            with _VISITOR_LOCK:
+                if visitor and visitor not in _VISITOR_LAST_SEEN:
+                    _TOTAL_VISITS += 1
+                if visitor:
+                    _VISITOR_LAST_SEEN[visitor] = now
+                cutoff = now - 90
+                active = sum(1 for seen in _VISITOR_LAST_SEEN.values() if seen >= cutoff)
+                # Keep the in-memory table bounded on a long-running service.
+                _VISITOR_LAST_SEEN = {key: seen for key, seen in _VISITOR_LAST_SEEN.items() if seen >= cutoff}
+                payload = {
+                    "total_visits": _TOTAL_VISITS,
+                    "online_now": active,
+                    "uptime_seconds": max(0, int(now - SITE_STARTED_AT)),
+                }
+            body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if path in {"/health", "/healthz"}:
             body = b'{"ok":true,"service":"toduss3store"}'
             self.send_response(200)

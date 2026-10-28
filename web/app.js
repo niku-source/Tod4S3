@@ -4,6 +4,45 @@ const form = document.querySelector('#requestForm');
 const selectedPlan = document.querySelector('#selectedPlan');
 const closeButton = document.querySelector('.modal-close');
 
+function visitorId() {
+  try {
+    let id = localStorage.getItem('toduss3_visitor_id');
+    if (!id) {
+      id = (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      localStorage.setItem('toduss3_visitor_id', id);
+    }
+    return id;
+  } catch {
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+}
+
+function formatUptime(seconds) {
+  const total = Math.max(0, Number(seconds) || 0);
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (days) return `${days}d ${hours}h`;
+  if (hours) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+async function refreshSiteStats() {
+  try {
+    const response = await fetch(`/api/site-stats?visitor=${encodeURIComponent(visitorId())}`, { cache: 'no-store' });
+    if (!response.ok) return;
+    const stats = await response.json();
+    document.querySelector('#totalVisits').textContent = Number(stats.total_visits || 0).toLocaleString('es');
+    document.querySelector('#onlineNow').textContent = Number(stats.online_now || 0).toLocaleString('es');
+    document.querySelector('#siteUptime').textContent = formatUptime(stats.uptime_seconds);
+  } catch {
+    // El contador es informativo; no debe afectar la navegación ni las compras.
+  }
+}
+
+refreshSiteStats();
+window.setInterval(refreshSiteStats, 10000);
+
 function openRequest(plan) {
   if (!modal || !selectedPlan) return;
   selectedPlan.value = plan;
