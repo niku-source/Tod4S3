@@ -250,8 +250,8 @@ PLANS = {
     "premium": {
         "name": "ᴘʀᴇᴍɪᴜᴍ",
         "display": "Premium",
-        "daily_bytes": 20 * GIB,
-        "daily_label": "20.00 GB",
+        "daily_bytes": float('inf'),
+        "daily_label": "∞ GB",
         "badge": "👑",
         "rank": 3,
         "storage_hours": LINK_EXPIRY_HOURS,
@@ -2165,6 +2165,7 @@ def admin_panel_text() -> str:
         "Revisa primero el comprobante",
         "enviado por el usuario y luego",
         "asigna el plan desde estos botones.",
+        "Premium = descargas sin límite.",
         "",
         "Datos y saldo virtual:",
         "",
@@ -2176,7 +2177,7 @@ def admin_panel_text() -> str:
         "Los roles VIP siguientes son manuales",
         "y no sustituyen los paquetes de datos.",
         "",
-        "Selecciona el plan comprado:",
+        "Selecciona el plan comprado (saldo móvil):",
     ]
     box = card("⚙️ ᴘᴀɴᴇʟ ᴅᴇ ᴀᴅᴍɪɴ", lines)
     return f"{box}\n\n{BOT_FOOTER}"
@@ -2188,7 +2189,9 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         [btn("🆓 ᴀᴄᴛɪᴠᴀʀ ɢʀᴀᴛɪꜱ", callback_data="admin:plan:free")],
         [btn("⭐ ᴀᴄᴛɪᴠᴀʀ ᴠɪᴘ ʙáꜱɪᴄᴏ", callback_data="admin:plan:vip_basic")],
         [btn("💎 ᴀᴄᴛɪᴠᴀʀ ᴠɪᴘ ᴍᴇᴅɪᴏ", callback_data="admin:plan:vip_medium")],
-        [btn("👑 ᴀᴄᴛɪᴠᴀʀ ᴘʀᴇᴍɪᴜᴍ · 15 ᴅíᴀꜱ / 250 ᴄᴜᴘ", callback_data="admin:plan:premium")],
+        [btn("👑 ᴘʀᴇᴍɪᴜᴍ · 15 ᴅíᴀꜱ / 250 ᴄᴜᴘ", callback_data="admin:premium_offer:15")],
+        [btn("👑 ᴘʀᴇᴍɪᴜᴍ · 20 ᴅíᴀꜱ / 600 ᴄᴜᴘ", callback_data="admin:premium_offer:20")],
+        [btn("👑 ᴘʀᴇᴍɪᴜᴍ · 30 ᴅíᴀꜱ / 500 ᴄᴜᴘ", callback_data="admin:premium_offer:30")],
         [btn("🔍 ᴄᴏɴꜱᴜʟᴛᴀʀ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:check")],
         [btn("👥 ᴜꜱᴜᴀʀɪᴏꜱ ʀᴇɢɪꜱᴛʀᴀᴅᴏꜱ", callback_data="admin:users:0")],
         [btn("🗂️ ʜɪꜱᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:user_history")],
@@ -2213,6 +2216,7 @@ def admin_duration_keyboard(plan_key: str) -> InlineKeyboardMarkup:
             btn("📅 15 ᴅíᴀꜱ", callback_data=f"admin:dur:{plan_key}:15"),
         ],
         [
+            btn("📅 20 ᴅíᴀꜱ", callback_data=f"admin:dur:{plan_key}:20"),
             btn("📅 30 ᴅíᴀꜱ (1 ᴍᴇꜱ)", callback_data=f"admin:dur:{plan_key}:30"),
             btn("📅 90 ᴅíᴀꜱ (3 ᴍᴇꜱᴇꜱ)", callback_data=f"admin:dur:{plan_key}:90"),
         ],
@@ -2234,7 +2238,11 @@ def admin_tutorial_text() -> str:
         "",
         "2️⃣ Selecciona el plan comprado",
         "   y el tiempo correspondiente.",
-        "   Premium: 15 días / 250 CUP.",
+        "   Premium sin límite:",
+        "   15 días / 250 CUP",
+        "   20 días / 600 CUP",
+        "   30 días / 500 CUP",
+        "   Todo por saldo móvil.",
         "",
         "3️⃣ Envía el ID del",
         "   usuario de Telegram.",
@@ -4029,6 +4037,28 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     card(f"⏳ ᴛɪᴇᴍᴘᴏ · {plan['display']}", lines),
                     reply_markup=admin_duration_keyboard(plan_key),
                 )
+            return
+
+        if query.data.startswith("admin:premium_offer:"):
+            days = int(query.data.split(":")[-1])
+            prices = {15: "250 CUP", 20: "600 CUP", 30: "500 CUP"}
+            if days not in prices:
+                return
+            context.user_data["admin_state"] = {"step": "awaiting_user_id", "plan": "premium", "days": days}
+            lines = [
+                "Plan: 👑 Premium",
+                "Descargas: Sin límite",
+                f"Duración: {days} días",
+                f"Precio: {prices[days]} en saldo móvil",
+                "",
+                "Verifica la captura del pago",
+                "y envía el ID de Telegram",
+                "del usuario que compró.",
+            ]
+            await edit_query_message_text(query.message,
+                card("🧾 ᴀᴄᴛɪᴠᴀʀ ᴄᴏᴍᴘʀᴀ", lines),
+                reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
+            )
             return
 
         if query.data.startswith("admin:dur:"):
