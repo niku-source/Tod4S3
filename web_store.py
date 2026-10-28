@@ -4,7 +4,9 @@ from __future__ import annotations
 import mimetypes
 import json
 import os
+import re
 import time
+from html import escape
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock, Thread
@@ -15,6 +17,24 @@ SITE_STARTED_AT = time.time()
 _VISITOR_LOCK = Lock()
 _VISITOR_LAST_SEEN: dict[str, float] = {}
 _TOTAL_VISITS = 0
+_MAX_VISITORS = 5000
+_VISITOR_RE = re.compile(r"^[A-Za-z0-9-]{8,96}$")
+_DEFAULT_ORIGIN = "https://tod4s3-production.up.railway.app"
+
+
+def _safe_site_origin(handler: "StoreHandler") -> str:
+    """Obtiene un origen seguro sin reflejar un Host arbitrario en HTML."""
+    configured = os.getenv("PUBLIC_SITE_URL", "").strip().rstrip("/")
+    if configured:
+        configured = configured.split("#", 1)[0].rstrip("/")
+        if re.fullmatch(r"https://[A-Za-z0-9.-]+(?::\d+)?", configured):
+            return configured
+    forwarded_proto = handler.headers.get("X-Forwarded-Proto", "https").split(",", 1)[0].strip().lower()
+    proto = forwarded_proto if forwarded_proto in {"http", "https"} else "https"
+    host = handler.headers.get("Host", "").split(",", 1)[0].strip()
+    if re.fullmatch(r"[A-Za-z0-9.-]+(?::\d{1,5})?", host):
+        return escape(f"{proto}://{host}", quote=True)
+    return _DEFAULT_ORIGIN
 
 
 class StoreHandler(SimpleHTTPRequestHandler):
@@ -26,6 +46,8 @@ class StoreHandler(SimpleHTTPRequestHandler):
         path = parsed.path
         if path == "/api/site-stats":
             visitor = parse_qs(parsed.query).get("visitor", [""])[0][:96]
+            if not _VISITOR_RE.fullmatch(visitor):
+                visitor = ""
             now = time.time()
             global _TOTAL_VISITS, _VISITOR_LAST_SEEN
             with _VISITOR_LOCK:
@@ -37,6 +59,10 @@ class StoreHandler(SimpleHTTPRequestHandler):
                 active = sum(1 for seen in _VISITOR_LAST_SEEN.values() if seen >= cutoff)
                 # Keep the in-memory table bounded on a long-running service.
                 _VISITOR_LAST_SEEN = {key: seen for key, seen in _VISITOR_LAST_SEEN.items() if seen >= cutoff}
+                if len(_VISITOR_LAST_SEEN) > _MAX_VISITORS:
+                    oldest = sorted(_VISITOR_LAST_SEEN, key=_VISITOR_LAST_SEEN.get)
+                    for key in oldest[:len(_VISITOR_LAST_SEEN) - _MAX_VISITORS]:
+                        _VISITOR_LAST_SEEN.pop(key, None)
                 payload = {
                     "total_visits": _TOTAL_VISITS,
                     "online_now": active,
@@ -62,7 +88,7 @@ class StoreHandler(SimpleHTTPRequestHandler):
         if path == "/manus-routes.json":
             self.path = "/manus-routes.json"
         elif path == "/":
-            origin = f"{self.headers.get('X-Forwarded-Proto', 'https').split(',')[0].strip()}://{self.headers.get('Host', '')}"
+            origin = _safe_site_origin(self)
             body = (WEB_ROOT / "index.html").read_bytes().replace(b"__SITE_ORIGIN__", origin.encode("utf-8"))
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -79,6 +105,18 @@ class StoreHandler(SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         # Mantener los logs de Railway útiles sin registrar parámetros privados.
         print(f"[web] {self.address_string()} - {format % args}", flush=True)
+
+    def end_headers(self):  # noqa: N802
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; media-src 'self'; "
+            "connect-src 'self'; base-uri 'self'; form-action 'self'",
+        )
+        super().end_headers()
 
 
 def start_store_server() -> Thread:
