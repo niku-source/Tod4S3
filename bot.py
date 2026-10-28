@@ -509,8 +509,10 @@ async def publish_channel_notice(
         if include_site_promo and PUBLIC_SITE_URL:
             lines.extend([
                 "",
-                "🌐 ᴡᴇʙ ᴏᴘᴄɪᴏɴᴀʟ ᴘᴀʀᴀ ᴘʟᴀɴᴇꜱ ɪʟɪᴍɪᴛᴀᴅᴏꜱ.",
+                "🌐 ᴡᴇʙ ᴏᴘᴄɪᴏɴᴀʟ ᴘᴀʀᴀ ᴄᴏᴍᴘʀᴀʀ",
+                "ᴘʟᴀɴᴇꜱ ɪʟɪᴍɪᴛᴀᴅᴏꜱ.",
                 "ʙᴏᴛ ꜱɪɢᴜᴇ ɢʀᴀᴛɪꜱ ᴘᴏʀ ʀᴇꜰᴇʀɪᴅᴏꜱ.",
+                "ɴᴏ ᴛᴇ ᴘʀᴇᴏᴄᴜᴘᴇꜱ, ᴇꜱ ᴏᴘᴄɪᴏɴᴀʟ.",
             ])
             rows = [list(row) for row in getattr(reply_markup, "inline_keyboard", [])] if reply_markup else []
             rows.append([InlineKeyboardButton("🔗 Link de la web", url=PUBLIC_SITE_URL, style="success")])
