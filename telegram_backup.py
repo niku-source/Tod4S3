@@ -457,6 +457,24 @@ def restore_snapshot(snapshot: dict[str, Any], layout: BackupLayout) -> tuple[in
         else:
             relative = _validate_relative_path(entry["path"])
             target = _secure_target(layout.auth_dir, PurePosixPath(*relative.parts[1:]))
+        if entry["kind"] == "state" and target.exists():
+            # Un deploy puede crear un JSON vacío antes de que termine la
+            # restauración. En ese caso sí debe entrar el estado respaldado;
+            # un archivo local con datos se conserva para no pisar cambios.
+            try:
+                existing = target.read_bytes().strip()
+                if existing not in {b"", b"{}"}:
+                    continue
+            except OSError:
+                continue
+            try:
+                target.write_bytes(content)
+                target.chmod(0o600)
+                restored += 1
+                restored_bytes += len(content)
+            except OSError:
+                continue
+            continue
         try:
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
             descriptor = os.open(target, flags, 0o600)

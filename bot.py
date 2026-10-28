@@ -2529,9 +2529,11 @@ def get_user_todus_number(user_id: int) -> str:
         data = _load_json(TODUS_USERS_FILE)
         entry = data.get(str(user_id))
         if isinstance(entry, dict):
-            return str(entry.get("number") or "")
+            number = _normalize_todus_number(entry.get("number") or "")
+            return number if re.fullmatch(r"53\d{8}", number) else ""
         if isinstance(entry, str):
-            return entry
+            number = _normalize_todus_number(entry)
+            return number if re.fullmatch(r"53\d{8}", number) else ""
     except Exception:
         log.error("Error leyendo número ToDus de %s", user_id, exc_info=True)
     return ""
@@ -3513,6 +3515,7 @@ async def todus_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         ]))
         return
     set_user_todus_number(user.id, number)
+    schedule_data_backup(context.application, "registro de número ToDus")
     await update.effective_message.reply_text(card("✅ ɴúᴍᴇʀᴏ ɢᴜᴀʀᴅᴀᴅᴏ", [
         f"Número: {{mono:{number}}}",
         "",
