@@ -227,12 +227,12 @@ PLANS = {
         "name": "ɢʀᴀᴛɪꜱ",
         "display": "Plan Gratis",
         "daily_bytes": GIB,
-        "daily_label": "1.00 GB",
+        "daily_label": "1.00 GB/24h",
         "badge": "🆓",
         "rank": 0,
         "storage_hours": LINK_EXPIRY_HOURS,
         "storage_label": "2 horas",
-        "quota_period_days": 2,
+        "quota_period_days": 1,
     },
     "vip_basic": {
         "name": "ᴠɪᴘ ʙáꜱɪᴄᴏ",
@@ -409,7 +409,7 @@ def _save_json(path: str, data: dict) -> None:
 
 
 def _ensure_data_quota_fields(entry: dict) -> dict:
-    """Initializes a one-time free 1 GB quota without resetting existing balances."""
+    """Initializes the free daily quota and preserves purchased data packages."""
     try:
         remaining = max(0, int(entry.get("data_quota_remaining_bytes", FREE_JOIN_QUOTA_BYTES)))
     except (TypeError, ValueError):
@@ -421,6 +421,24 @@ def _ensure_data_quota_fields(entry: dict) -> dict:
     entry["data_quota_remaining_bytes"] = remaining
     entry["data_quota_total_bytes"] = total
     entry.setdefault("data_quota_used_bytes", max(0, total - remaining))
+    if "free_quota_remaining_bytes" not in entry:
+        # Migrate the old combined balance: up to 1 GB is the free quota and
+        # anything above it is treated as purchased/referral data.
+        free_remaining = min(remaining, FREE_JOIN_QUOTA_BYTES)
+        entry["free_quota_remaining_bytes"] = free_remaining
+        entry["data_bonus_remaining_bytes"] = max(0, remaining - free_remaining)
+        entry["free_quota_reset_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        try:
+            entry["free_quota_remaining_bytes"] = max(
+                0, min(FREE_JOIN_QUOTA_BYTES, int(entry["free_quota_remaining_bytes"]))
+            )
+        except (TypeError, ValueError):
+            entry["free_quota_remaining_bytes"] = FREE_JOIN_QUOTA_BYTES
+        try:
+            entry["data_bonus_remaining_bytes"] = max(0, int(entry.get("data_bonus_remaining_bytes", 0)))
+        except (TypeError, ValueError):
+            entry["data_bonus_remaining_bytes"] = 0
     return entry
 
 
@@ -619,10 +637,11 @@ def purchase_data_package(user_id: int, package_key: str) -> tuple[bool, str, in
             entry = {}
         _ensure_data_quota_fields(entry)
         balance = max(0, int(entry.get("balance", REFERRAL_START_BALANCE)))
-        remaining = int(entry["data_quota_remaining_bytes"])
+        remaining = int(entry.get("free_quota_remaining_bytes", 0)) + int(entry.get("data_bonus_remaining_bytes", 0))
         if balance < package["price"]:
             return False, "insufficient", balance, remaining
         entry["balance"] = balance - package["price"]
+        entry["data_bonus_remaining_bytes"] = int(entry.get("data_bonus_remaining_bytes", 0)) + package["bytes"]
         entry["data_quota_remaining_bytes"] = remaining + package["bytes"]
         entry["data_quota_total_bytes"] += package["bytes"]
         entry["data_quota_packages_purchased"] = int(entry.get("data_quota_packages_purchased", 0)) + 1
@@ -935,11 +954,20 @@ def add_daily_usage(user_id: int, file_bytes: int) -> None:
         if not isinstance(account, dict):
             account = {}
         _ensure_data_quota_fields(account)
-        remaining = int(account["data_quota_remaining_bytes"])
+        if get_user_plan(user_id) == "free":
+            # Refresh the daily free bucket before consuming this transfer.
+            get_remaining_quota(user_id)
+            account = _load_json(USERS_DATA_FILE).get("users", {}).get(str(user_id), account)
+            _ensure_data_quota_fields(account)
+        remaining = int(account.get("free_quota_remaining_bytes", 0)) + int(account.get("data_bonus_remaining_bytes", 0))
         if file_bytes < 0 or file_bytes > remaining:
             log.warning("No se pudo descontar cuota user=%s bytes=%s remaining=%s", user_id, file_bytes, remaining)
             return
-        account["data_quota_remaining_bytes"] = remaining - int(file_bytes)
+        free_remaining = int(account.get("free_quota_remaining_bytes", 0))
+        consumed_free = min(free_remaining, int(file_bytes))
+        account["free_quota_remaining_bytes"] = free_remaining - consumed_free
+        account["data_bonus_remaining_bytes"] = int(account.get("data_bonus_remaining_bytes", 0)) - (int(file_bytes) - consumed_free)
+        account["data_quota_remaining_bytes"] = int(account["free_quota_remaining_bytes"]) + int(account["data_bonus_remaining_bytes"])
         account["data_quota_used_bytes"] = int(account.get("data_quota_used_bytes", 0)) + int(file_bytes)
         users[str(user_id)] = account
         users_data["users"] = users
@@ -1024,10 +1052,31 @@ def admin_leaderboard_text(limit: int = 20) -> str:
 def get_remaining_quota(user_id: int) -> int:
     if is_owner(user_id) or get_user_plan(user_id) == "premium":
         return 10**18
-    users = _load_json(USERS_DATA_FILE).get("users", {})
+    users_data = _load_json(USERS_DATA_FILE)
+    users = users_data.get("users", {})
     entry = users.get(str(user_id), {}) if isinstance(users, dict) else {}
     if not isinstance(entry, dict):
         return FREE_JOIN_QUOTA_BYTES
+    if get_user_plan(user_id) == "free":
+        _ensure_data_quota_fields(entry)
+        now = datetime.now(timezone.utc)
+        reset_at = entry.get("free_quota_reset_at")
+        try:
+            reset_due = not reset_at or now >= datetime.fromisoformat(reset_at) + timedelta(hours=24)
+        except (TypeError, ValueError):
+            reset_due = True
+        if reset_due:
+            entry["free_quota_remaining_bytes"] = FREE_JOIN_QUOTA_BYTES
+            entry["free_quota_reset_at"] = now.isoformat()
+        entry["data_quota_remaining_bytes"] = (
+            int(entry.get("free_quota_remaining_bytes", FREE_JOIN_QUOTA_BYTES))
+            + int(entry.get("data_bonus_remaining_bytes", 0))
+        )
+        if isinstance(users, dict):
+            users[str(user_id)] = entry
+            users_data["users"] = users
+            _save_json(USERS_DATA_FILE, users_data)
+        return max(0, int(entry["data_quota_remaining_bytes"]))
     try:
         return max(0, int(entry.get("data_quota_remaining_bytes", FREE_JOIN_QUOTA_BYTES)))
     except (TypeError, ValueError):
@@ -1415,12 +1464,17 @@ def quota_lines(user_id: int) -> list[str]:
     filled = round(width * percent / 100)
     bar = "▓" * filled + "░" * (width - filled)
     plan_label = "Gratis + paquetes de datos" if plan["rank"] == 0 else f"{plan['badge']} {plan['display']} + datos prepagados"
+    period_line = (
+        "♻️ Plan Gratis: 1 GB se renueva cada 24 h."
+        if plan["rank"] == 0
+        else "♾️ Los paquetes no vencen; se consumen al transferir."
+    )
     lines = [
         f"🏷 Plan: {plan_label}",
         f"📊 {bar} {percent}%",
         f"📦 Gastado en total: {data_quota_label(used)}",
         f"💾 Cupo disponible: {data_quota_label(remaining)}",
-        "♾️ El paquete no vence; se consume al transferir.",
+        period_line,
         f"💰 Saldo de referidos: {get_user_balance(user_id)}$",
     ]
     return lines
@@ -1987,7 +2041,8 @@ def plans_text(user_id: int, bot_username: str | None = None) -> str:
             f"💰 Saldo de referidos: {balance}$",
             f"📦 Datos disponibles: {data_quota_label(get_remaining_quota(user_id))}",
             "",
-            "🎁 Al unirte recibes 1 GB gratis y 5$.",
+            "🎁 Recibes 1 GB gratis y 5$.",
+            "El 1 GB gratuito se renueva cada 24 h.",
             "👥 Cada referido válido te da 5$.",
             "Los paquetes no vencen; se descuentan",
             "al completar transferencias.",
@@ -2362,7 +2417,7 @@ HELP_PAGES = [
         "⚡ Rápido y seguro.",
         "",
         "🎁 El bot es gratuito:",
-        "incluye 1 GB gratis.",
+        "incluye 1 GB gratis cada 24 h.",
         "👥 Funciona por referidos.",
         "💎 Comprar Premium es opcional.",
     ]),

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Solicita tu plan ToDus S3 desde Telegram y disfruta de más capacidad para tus descargas.">
+  <meta name="description" content="Solicita tu plan ToDus S3 desde Telegram. El bot es gratuito y los planes Premium son opcionales.">
   <meta property="og:type" content="website">
   <meta property="og:title" content="ToDus S3 · Servicio de descarga">
   <meta property="og:description" content="El bot sigue siendo gratis. Los planes Premium ilimitados son opcionales.">
@@ -18,6 +18,7 @@
 <body>
   <div class="ambient ambient-one" aria-hidden="true"></div>
   <div class="ambient ambient-two" aria-hidden="true"></div>
+
   <header class="site-header">
     <a class="brand" href="#inicio" aria-label="ToDus S3, inicio">
       <span class="brand-mark" aria-hidden="true">↗</span>
@@ -25,10 +26,11 @@
     </a>
     <nav class="nav" aria-label="Navegación principal">
       <a href="#planes">Planes</a>
-      <a href="#como-funciona">Cómo funciona</a>
+      <a href="#info">Información</a>
       <a class="nav-telegram" href="https://t.me/Niku_Blade" target="_blank" rel="noopener"><img src="/telegram-mark.svg" alt=""> Telegram <span>↗</span></a>
     </nav>
   </header>
+
   <section class="live-strip section-shell" aria-label="Estado en vivo">
     <div class="live-status"><i></i><strong>ONLINE</strong><span>servicio activo</span></div>
     <div class="live-stat"><b id="totalVisits">—</b><span>visitas</span></div>
@@ -41,84 +43,104 @@
       <div class="hero-copy">
         <p class="eyebrow"><span class="pulse-dot"></span> DESCARGAS SIN COMPLICACIONES</p>
         <h1>Más espacio.<br><em>Más posibilidades.</em></h1>
-        <p class="hero-lede">Elige el plan que deseas adquirir y solicita la activación directamente por nuestro chat privado de Telegram.</p>
+        <p class="hero-lede">El bot sigue siendo gratis, con 1 GB cada 24 horas. Si quieres descargas sin límite, solicita un plan Premium por Telegram.</p>
         <div class="hero-actions">
           <a class="button button-primary" href="#planes">Ver planes <span>↓</span></a>
-          <a class="text-link" href="#como-funciona">¿Cómo funciona? <span>→</span></a>
+          <a class="text-link" href="#video-compra">Ver cómo comprar <span>→</span></a>
         </div>
         <div class="hero-proof"><span class="proof-line"></span><span>Entrega por ToDus</span><span class="proof-separator">·</span><span>Solicitud privada</span></div>
       </div>
       <div class="hero-orbit" aria-hidden="true">
         <div class="orbit orbit-a"></div><div class="orbit orbit-b"></div>
         <div class="core-card"><span class="core-icon">↗</span><span class="core-label">TDS<br><b>S3</b></span><span class="core-status"><i></i> ONLINE</span></div>
-        <div class="float-chip chip-one"><span>↓</span> 20 GB / día</div>
+        <div class="float-chip chip-one"><span>∞</span> Premium</div>
         <div class="float-chip chip-two"><span>◎</span> Chat privado</div>
         <div class="float-chip chip-three"><span>✦</span> ToDus ready</div>
       </div>
     </section>
 
+    <section id="video-compra" class="video-section section-shell compact-video">
+      <div class="section-heading"><div><p class="eyebrow">GUÍA RÁPIDA</p><h2>Cómo comprar tu plan, <em>paso a paso.</em></h2></div><p class="section-note">Mira primero el resumen y luego elige una oferta.</p></div>
+      <div class="video-frame"><video controls preload="metadata" playsinline aria-label="Video explicativo para comprar un plan"><source src="/assets/how-to-buy.mp4" type="video/mp4">Tu navegador no puede reproducir este video.</video><div class="video-caption"><span class="pulse-dot"></span><span>Guía en español · activación manual</span></div></div>
+    </section>
+
     <section id="planes" class="section-shell plans-section">
-      <div class="section-heading"><div><p class="eyebrow">01 / PLANES DISPONIBLES</p><h2>Elige tu <em>ritmo.</em></h2></div><p class="section-note">Selecciona un plan y pulsa el botón para solicitarlo en el chat privado.</p></div>
+      <div class="section-heading"><div><p class="eyebrow">01 / PLANES DISPONIBLES</p><h2>Elige tu <em>ritmo.</em></h2></div><p class="section-note">Tres opciones Premium. Pulsa solicitar y se abrirá el chat privado.</p></div>
       <div class="plan-grid">
         <article class="plan-card plan-basic offer-card" data-plan-card>
           <div class="plan-top"><span class="plan-icon">✦</span><span class="plan-tag">ENTRADA PREMIUM</span></div>
-          <h3>Premium 15</h3><p class="plan-description">Potencia total para tus descargas durante medio mes.</p>
-          <div class="quota"><strong>∞</strong><span>descargas</span></div><div class="plan-price"><b>250 CUP</b><span> / 15 días</span></div>
-          <ul class="features"><li>Descargas sin límite</li><li>Entrega directa por ToDus</li><li>Pago por Transfermóvil o saldo móvil</li></ul>
+          <h3>Premium 15</h3><p class="plan-description">Potencia total durante medio mes.</p>
+          <div class="quota"><strong>∞</strong><span>descargas</span></div><div class="plan-price"><b>250 CUP</b><span>/ 15 días</span></div>
+          <details class="plan-details"><summary>Ver qué incluye</summary><ul class="features"><li>Descargas sin límite</li><li>Entrega directa por ToDus</li><li>Transfermóvil o saldo móvil</li></ul></details>
           <a class="button button-premium plan-button" data-plan="Premium 15 días · 250 CUP · Transfermóvil o saldo móvil" href="#request">Solicitar plan <span>↗</span></a>
         </article>
         <article class="plan-card plan-premium offer-card offer-featured" data-plan-card>
           <div class="plan-top"><span class="plan-icon">✧</span><span class="plan-tag">OFERTA PREMIUM</span></div>
-          <h3>Premium 20</h3><p class="plan-description">Acceso ilimitado con activación manual tras verificar el pago.</p>
-          <div class="quota"><strong>∞</strong><span>descargas</span></div><div class="plan-price"><b>300 CUP</b><span> / 20 días</span></div>
-          <ul class="features"><li>Descargas sin límite</li><li>Entrega directa por ToDus</li><li>Pago por Transfermóvil o saldo móvil</li></ul>
+          <h3>Premium 20</h3><p class="plan-description">Acceso ilimitado con activación manual.</p>
+          <div class="quota"><strong>∞</strong><span>descargas</span></div><div class="plan-price"><b>300 CUP</b><span>/ 20 días</span></div>
+          <details class="plan-details"><summary>Ver qué incluye</summary><ul class="features"><li>Descargas sin límite</li><li>Entrega directa por ToDus</li><li>Transfermóvil o saldo móvil</li></ul></details>
           <a class="button button-premium plan-button" data-plan="Premium 20 días · 300 CUP · Transfermóvil o saldo móvil" href="#request">Solicitar plan <span>↗</span></a>
         </article>
         <article class="plan-card plan-medium offer-card" data-plan-card>
           <div class="plan-top"><span class="plan-icon">◇</span><span class="plan-tag">MÁS DURACIÓN</span></div>
-          <h3>Premium 30</h3><p class="plan-description">Un mes completo de descargas sin límite.</p>
-          <div class="quota"><strong>∞</strong><span>descargas</span></div><div class="plan-price"><b>500 CUP</b><span> / 30 días</span></div>
-          <ul class="features"><li>Descargas sin límite</li><li>Entrega directa por ToDus</li><li>Pago por Transfermóvil o saldo móvil</li></ul>
+          <h3>Premium 30</h3><p class="plan-description">Un mes completo sin límite.</p>
+          <div class="quota"><strong>∞</strong><span>descargas</span></div><div class="plan-price"><b>500 CUP</b><span>/ 30 días</span></div>
+          <details class="plan-details"><summary>Ver qué incluye</summary><ul class="features"><li>Descargas sin límite</li><li>Entrega directa por ToDus</li><li>Transfermóvil o saldo móvil</li></ul></details>
           <a class="button button-premium plan-button" data-plan="Premium 30 días · 500 CUP · Transfermóvil o saldo móvil" href="#request">Solicitar plan <span>↗</span></a>
         </article>
       </div>
-      <p class="request-note"><span>i</span> Puedes pagar por Transfermóvil o saldo móvil. Después de pagar, envía la captura del comprobante por Telegram para que el administrador revise y active manualmente tu plan.</p>
+      <p class="request-note"><span>i</span> Paga por Transfermóvil o saldo móvil y envía la captura por Telegram. La activación es manual después de verificar el comprobante.</p>
     </section>
 
-    <section id="video-compra" class="video-section section-shell">
-      <div class="section-heading"><div><p class="eyebrow">02 / GUÍA RÁPIDA</p><h2>Cómo comprar tu plan, <em>paso a paso.</em></h2></div><p class="section-note">Mira el resumen y conoce cómo elegir, pagar y enviar el comprobante.</p></div>
-      <div class="video-frame"><video controls preload="metadata" playsinline aria-label="Video explicativo para comprar un plan"><source src="/assets/how-to-buy.mp4" type="video/mp4">Tu navegador no puede reproducir este video.</video><div class="video-caption"><span class="pulse-dot"></span><span>Guía en español · música de fondo · activación manual</span></div></div>
-    </section>
-
-    <section id="pagos" class="payment-section section-shell">
-      <div class="section-heading"><div><p class="eyebrow">03 / MÉTODOS DE PAGO</p><h2>Paga como <em>prefieras.</em></h2></div><p class="section-note">Aceptamos Transfermóvil y saldo móvil. La activación se realiza manualmente después de revisar tu comprobante.</p></div>
-      <div class="payment-method-grid">
-        <article class="payment-method"><div class="payment-image payment-transfer"><img src="/assets/transfermovil.png" alt="Logotipo de Transfermóvil"></div><div class="payment-copy"><span class="payment-label">PAGO DIGITAL</span><h3>Transfermóvil</h3><p>Realiza la transferencia desde la aplicación y conserva la captura del comprobante.</p><span class="payment-badge">Transferencia verificada</span></div></article>
-        <article class="payment-method"><div class="payment-image payment-mobile"><img src="/assets/saldo-movil.jpg" alt="Icono de saldo móvil"></div><div class="payment-copy"><span class="payment-label">PAGO MÓVIL</span><h3>Saldo móvil</h3><p>También puedes pagar enviando saldo móvil. El administrador revisará el comprobante.</p><span class="payment-badge">Saldo móvil aceptado</span></div></article>
-      </div>
-      <p class="payment-note"><strong>Importante:</strong> la solicitud no confirma la compra. Envía el comprobante al chat privado de <a href="https://t.me/Niku_Blade" target="_blank" rel="noopener">@Niku_Blade</a> para activar tu plan.</p>
-    </section>
-
-    <section class="visual-guide section-shell" id="limites">
-      <div class="section-heading"><div><p class="eyebrow">04 / EL SISTEMA POR DENTRO</p><h2>Descarga. <em>Recibe.</em></h2></div><p class="section-note">El bot conecta tu enlace con Telegram y entrega el archivo por ToDus de forma clara y directa.</p></div>
-      <div class="visual-grid">
-        <article class="visual-card visual-telegram"><div class="visual-art"><div class="telegram-orb"><img src="/telegram-mark.svg" alt="Telegram"></div><span class="art-spark spark-a">+</span><span class="art-spark spark-b">✦</span></div><h3>Telegram</h3><p>Envías un enlace, archivo o mensaje al bot y él identifica la descarga.</p></article>
-        <article class="visual-card visual-download"><div class="visual-art"><div class="download-cloud"><span>↓</span><i></i><i></i><i></i></div></div><h3>Descarga procesada</h3><p>El bot descarga, prepara el archivo y lo divide automáticamente si hace falta.</p></article>
-        <article class="visual-card visual-todus"><div class="visual-art"><div class="todus-node"><span>↗</span><b>ToDus</b><small>ENTREGA NACIONAL</small></div><div class="node-line"></div></div><h3>Entrega por ToDus</h3><p>Recibes las partes en tu chat de ToDus para descargarlas con tráfico nacional.</p></article>
-      </div>
-      <div class="limits-panel"><div class="limits-title"><span class="limit-icon">⌁</span><div><p class="eyebrow">LÍMITES TRANSPARENTES</p><h3>Qué significa «sin límite»</h3></div></div><div class="limit-items"><div><strong>∞</strong><span>Cantidad de descargas sin límite mientras tu Premium esté activo.</span></div><div><strong>↗</strong><span>Los archivos grandes pueden enviarse automáticamente en varias partes.</span></div><div><strong>!</strong><span>Siguen aplicando los límites técnicos de Telegram, ToDus, tamaño de archivo y conexión.</span></div></div></div>
-    </section>
-
-    <section id="como-funciona" class="how-section">
-      <div class="section-shell"><div class="section-heading"><div><p class="eyebrow">05 / PROCESO SIMPLE</p><h2>Así de <em>fácil.</em></h2></div><p class="section-note">Sin checkout automático. Tu solicitud viaja directamente al chat correcto.</p></div>
-        <div class="steps"><div class="step"><span class="step-number">01</span><div><h3>Elige tu plan</h3><p>Selecciona el plan y completa tus datos de solicitud.</p></div></div><div class="step"><span class="step-number">02</span><div><h3>Transfiere</h3><p>Realiza el pago por el método que te indique el administrador.</p></div></div><div class="step"><span class="step-number">03</span><div><h3>Envía el comprobante</h3><p>En el chat privado de <strong>@Niku_Blade</strong>, envía la captura de la transferencia. Tras revisarla, el plan se activa manualmente.</p></div></div></div>
+    <section id="info" class="compact-info section-shell">
+      <div class="section-heading"><div><p class="eyebrow">02 / INFORMACIÓN RÁPIDA</p><h2>Todo claro, <em>sin bajar de más.</em></h2></div><p class="section-note">Abre solo el bloque que quieras consultar.</p></div>
+      <div class="info-grid">
+        <details class="info-accordion" open>
+          <summary><span class="accordion-icon">₿</span><span><b>Métodos de pago</b><small>Transfermóvil o saldo móvil</small></span><i>＋</i></summary>
+          <div class="accordion-content payment-mini-grid">
+            <div class="payment-mini"><div class="payment-image payment-transfer"><img src="/assets/transfermovil.png" alt="Logotipo de Transfermóvil"></div><div><b>Transfermóvil</b><p>Guarda la captura del comprobante.</p></div></div>
+            <div class="payment-mini"><div class="payment-image payment-mobile"><img src="/assets/saldo-movil.jpg" alt="Icono de saldo móvil"></div><div><b>Saldo móvil</b><p>Envía el comprobante por Telegram.</p></div></div>
+            <p class="accordion-note">La solicitud no confirma la compra. El administrador revisa el pago y activa el plan manualmente.</p>
+          </div>
+        </details>
+        <details class="info-accordion">
+          <summary><span class="accordion-icon">↗</span><span><b>Cómo funciona</b><small>El proceso en tres pasos</small></span><i>＋</i></summary>
+          <div class="accordion-content steps compact-steps">
+            <div class="step"><span class="step-number">01</span><div><h3>Elige</h3><p>Selecciona tu plan y pulsa «Solicitar plan».</p></div></div>
+            <div class="step"><span class="step-number">02</span><div><h3>Escribe</h3><p>Se abre el chat privado de <strong>@Niku_Blade</strong>.</p></div></div>
+            <div class="step"><span class="step-number">03</span><div><h3>Confirma</h3><p>Envía el comprobante y espera la activación.</p></div></div>
+          </div>
+        </details>
+        <details class="info-accordion">
+          <summary><span class="accordion-icon">∞</span><span><b>Entrega y límites</b><small>Qué significa sin límite</small></span><i>＋</i></summary>
+          <div class="accordion-content limits-mini">
+            <p><strong>∞</strong> Descargas sin límite mientras Premium esté activo.</p>
+            <p><strong>↗</strong> Los archivos grandes se envían automáticamente en varias partes.</p>
+            <p><strong>!</strong> Se mantienen los límites técnicos de Telegram, ToDus y la conexión.</p>
+          </div>
+        </details>
       </div>
     </section>
 
     <section class="final-cta section-shell"><div><p class="eyebrow">¿LISTO PARA EMPEZAR?</p><h2>Tu próxima descarga<br><em>empieza aquí.</em></h2></div><a class="button button-primary" href="#planes">Ver planes <span>↓</span></a></section>
   </main>
+
   <footer class="site-footer section-shell"><span>© 2026 ToDus S3</span><span>Solicitud de planes por <a href="https://t.me/Niku_Blade" target="_blank" rel="noopener">Telegram privado</a></span></footer>
-  <div class="modal-backdrop" id="requestModal" hidden><section class="request-modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><button class="modal-close" type="button" aria-label="Cerrar">×</button><p class="eyebrow">SOLICITUD PRIVADA</p><h2 id="modalTitle">Adquirir un plan.</h2><p class="modal-lede">Completa tus datos. Puedes pagar por Transfermóvil o saldo móvil. Después de pagar, enviarás la captura del comprobante en el chat privado para que revisemos y activemos tu plan.</p><form id="requestForm"><label>Plan seleccionado<input id="selectedPlan" name="plan" readonly></label><label>Tu nombre<input name="name" required maxlength="80" placeholder="Ej. Carlos"></label><label>Tu usuario de Telegram<input name="username" maxlength="50" placeholder="@usuario"></label><div class="payment-callout"><strong>Importante</strong><span>La solicitud no confirma la compra. Paga por Transfermóvil o saldo móvil y envía la captura del comprobante por Telegram.</span></div><button class="button button-primary" type="submit"><img src="/telegram-mark.svg" alt=""> Abrir chat privado <span>↗</span></button></form></section></div>
+
+  <div class="modal-backdrop" id="requestModal" hidden>
+    <section class="request-modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <button class="modal-close" type="button" aria-label="Cerrar">×</button>
+      <p class="eyebrow">SOLICITUD PRIVADA</p><h2 id="modalTitle">Adquirir un plan.</h2>
+      <p class="modal-lede">Completa tus datos. Puedes pagar por Transfermóvil o saldo móvil. Después de pagar, enviarás la captura del comprobante en el chat privado para activar tu plan.</p>
+      <form id="requestForm">
+        <label>Plan seleccionado<input id="selectedPlan" name="plan" readonly></label>
+        <label>Tu nombre<input name="name" required maxlength="80" placeholder="Ej. Carlos"></label>
+        <label>Tu usuario de Telegram<input name="username" maxlength="50" placeholder="@usuario"></label>
+        <div class="payment-callout"><strong>Importante</strong><span>La solicitud no confirma la compra. Paga y envía la captura del comprobante por Telegram.</span></div>
+        <button class="button button-primary" type="submit"><img src="/telegram-mark.svg" alt=""> Abrir chat privado <span>↗</span></button>
+      </form>
+    </section>
+  </div>
   <script src="/app.js" defer></script>
 </body>
 </html>
