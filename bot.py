@@ -782,7 +782,15 @@ def set_user_plan(user_id: int, plan_key: str, days: int | None = None) -> dict:
     return entry
 
 
-def record_admin_audit(actor_id: int, target_id: int, plan_key: str, days: int | None) -> None:
+def record_admin_audit(
+    actor_id: int,
+    target_id: int,
+    plan_key: str,
+    days: int | None,
+    *,
+    price_cup: int | None = None,
+    payment_method: str | None = None,
+) -> None:
     """Añade una entrada al reporte sin borrar las asignaciones anteriores."""
     try:
         data = _load_json(ADMIN_AUDIT_FILE)
@@ -797,6 +805,10 @@ def record_admin_audit(actor_id: int, target_id: int, plan_key: str, days: int |
             "plan": plan_key,
             "days": days if days and days > 0 else None,
         })
+        if price_cup is not None:
+            events[0]["price_cup"] = int(price_cup)
+        if payment_method:
+            events[0]["payment_method"] = payment_method
         data["events"] = events[:500]
         _save_json(ADMIN_AUDIT_FILE, data)
     except Exception as exc:
@@ -811,7 +823,10 @@ def admin_report_text() -> str:
         duration = event.get("days") or "∞"
         when = str(event.get("at", ""))[:16].replace("T", " ")
         lines.append(f"{plan['badge']} {plan['display']} · {duration} días")
-        lines.append(f"ᴜꜱᴜᴀʀɪᴏ: {event.get('target_id', '?')} · {when}")
+        purchase = ""
+        if event.get("price_cup") is not None:
+            purchase = f" · {event.get('price_cup')} CUP · {event.get('payment_method', 'pago')}"
+        lines.append(f"ᴜꜱᴜᴀʀɪᴏ: {event.get('target_id', '?')} · {when}{purchase}")
         lines.append("")
     if not events:
         lines.append("ɴᴏ ʜᴀʏ ᴀᴄᴄɪᴏɴᴇꜱ ɢᴜᴀʀᴅᴀᴅᴀꜱ.")
@@ -4130,7 +4145,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             context.user_data.pop("admin_state", None)
 
             entry = set_user_plan(target_id, plan_key, days if days > 0 else None)
-            record_admin_audit(user.id, target_id, plan_key, days if days > 0 else None)
+            offer_prices = {15: 250, 20: 600, 30: 500}
+            price_cup = offer_prices.get(days) if plan_key == "premium" else None
+            record_admin_audit(
+                user.id,
+                target_id,
+                plan_key,
+                days if days > 0 else None,
+                price_cup=price_cup,
+                payment_method="saldo móvil" if price_cup is not None else None,
+            )
             schedule_data_backup(context.application, "cambio de plan")
             plan = get_plan_info(plan_key)
             exp_date, _ = get_plan_expiry_info(target_id)
