@@ -504,8 +504,8 @@ async def publish_channel_notice(
         if include_site_promo and PUBLIC_SITE_URL:
             lines.extend([
                 "",
-                "🌐 Ahora tenemos nuestra propia web para adquirir un plan ilimitado.",
-                "El bot sigue siendo totalmente gratis y funciona por referidos.",
+                "🌐 Web opcional para planes ilimitados.",
+                "Bot gratis por referidos.",
             ])
             rows = [list(row) for row in getattr(reply_markup, "inline_keyboard", [])] if reply_markup else []
             rows.append([InlineKeyboardButton("🔗 Link de la web", url=PUBLIC_SITE_URL, style="success")])
@@ -3013,7 +3013,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 [
                     f"👤 Usuario: {task_public_user_label(job)}",
                     f"📦 Tamaño enviado: {_size_label(size)}",
-                    "✅ Archivo entregado por ToDus.",
+                    "✅ Entregado por ToDus.",
                 ],
                 include_site_promo=True,
             )
@@ -3034,13 +3034,8 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 "📥 ɴᴜᴇᴠᴀ ᴅᴇꜱᴄᴀʀɢᴀ",
                 [
                     f"👤 Usuario: {task_public_user_label(job)}",
-                    "",
-                    "📄 Archivo:",
-                    filename,
-                    "",
                     f"📦 Tamaño: {_size_label(size)}",
-                    "✅ Descarga y subida",
-                    "completadas correctamente.",
+                    "✅ Descarga completada.",
                 ],
                 reply_markup=channel_download_keyboard([url for _, url in links]),
                 include_site_promo=True,
