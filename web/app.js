@@ -50,3 +50,16 @@ form?.addEventListener('submit', (event) => {
   window.open(`https://t.me/${TELEGRAM_HANDLE}?text=${encodeURIComponent(message)}`, '_blank', 'noopener');
   closeRequest();
 });
+
+const revealItems = document.querySelectorAll('.plan-card, .visual-card, .step, .limits-panel, .final-cta');
+if ('IntersectionObserver' in window) {
+  revealItems.forEach((item) => item.classList.add('reveal-ready'));
+  const observer = new IntersectionObserver((entries, currentObserver) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add('is-visible');
+      currentObserver.unobserve(entry.target);
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -32px' });
+  revealItems.forEach((item) => observer.observe(item));
+}
