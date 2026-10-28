@@ -95,7 +95,12 @@ REQUIRED_TODUS_CHANNEL = os.getenv("REQUIRED_TODUS_CHANNEL", "").strip() or "@da
 CHANNEL_JOIN_URL = os.getenv("CHANNEL_JOIN_URL", "").strip() or "https://t.me/Dark_Zone_666"
 GROUP_JOIN_URL = os.getenv("GROUP_JOIN_URL", "").strip() or "https://t.me/grupozonaoscura"
 TODUS_CHANNEL_JOIN_URL = os.getenv("TODUS_CHANNEL_JOIN_URL", "").strip() or "https://t.me/darzPrbo"
-PUBLIC_CHANNEL_ID = os.getenv("PUBLIC_CHANNEL_ID", "").strip() or "@darzPrbo"
+PUBLIC_CHANNEL_ID = (
+    os.getenv("PUBLIC_CHANNEL_ID", "").strip()
+    or os.getenv("PUBLIC_TELEGRAM_CHANNEL_ID", "").strip()
+    or os.getenv("TELEGRAM_CHANNEL_ID", "").strip()
+    or "@darzPrbo"
+)
 PUBLIC_SITE_URL = os.getenv("PUBLIC_SITE_URL", "").strip().rstrip("/")
 if not PUBLIC_SITE_URL:
     railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().strip("/")
@@ -545,7 +550,12 @@ async def publish_channel_notice(
         )
         return True
     except Exception as exc:
-        log.warning("No se pudo publicar aviso en el canal (%s).", type(exc).__name__)
+        log.warning(
+            "No se pudo publicar aviso en el canal configurado %s (%s). "
+            "Comprueba que el bot sea administrador y tenga permiso para publicar.",
+            PUBLIC_CHANNEL_ID,
+            type(exc).__name__,
+        )
         return False
 
 
@@ -5422,6 +5432,7 @@ async def post_init(application: Application) -> None:
         log.error("No hay destino de respaldo: configura TELEGRAM_BACKUP_CHAT_ID.")
     else:
         log.info("Destino de respaldo configurado: %s", backup_chat_id)
+    log.info("Canal público de avisos configurado: %s", PUBLIC_CHANNEL_ID)
 
     # Restaurar datos antes de abrir la sesión MTProto de Telegram.
     if backup_chat_id:
