@@ -514,6 +514,7 @@ async def publish_channel_notice(
             ])
             rows = [list(row) for row in getattr(reply_markup, "inline_keyboard", [])] if reply_markup else []
             rows.append([InlineKeyboardButton("🔗 Link de la web", url=PUBLIC_SITE_URL, style="success")])
+            rows.append([InlineKeyboardButton("💬 Escribir al administrador", url="https://t.me/Niku_Blade", style="primary")])
             reply_markup = InlineKeyboardMarkup(rows)
         await bot_obj.send_message(
             chat_id=PUBLIC_CHANNEL_ID,
