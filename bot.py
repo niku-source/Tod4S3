@@ -504,11 +504,12 @@ async def publish_channel_notice(
         if include_site_promo and PUBLIC_SITE_URL:
             lines.extend([
                 "",
-                "🌐 Ahora tenemos nuestra propia web:",
-                PUBLIC_SITE_URL,
-                "Si quieres adquirir un plan ilimitado, puedes hacerlo allí.",
+                "🌐 Ahora tenemos nuestra propia web para adquirir un plan ilimitado.",
                 "El bot sigue siendo totalmente gratis y funciona por referidos.",
             ])
+            rows = [list(row) for row in getattr(reply_markup, "inline_keyboard", [])] if reply_markup else []
+            rows.append([InlineKeyboardButton("🔗 Link de la web", url=PUBLIC_SITE_URL, style="success")])
+            reply_markup = InlineKeyboardMarkup(rows)
         await bot_obj.send_message(
             chat_id=PUBLIC_CHANNEL_ID,
             text=card(title, lines),
