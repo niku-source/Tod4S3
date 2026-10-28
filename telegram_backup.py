@@ -679,19 +679,11 @@ async def backup_to_telegram(
                 except Exception as exc:
                     edit_error = exc
             if edit_error is not None:
-                # Fallback seguro: crear y validar la nueva antes de tocar la
-                # anterior. Así un deploy o un fallo de Telegram nunca deja
-                # el chat sin una copia recuperable.
-                try:
-                    uploaded = await bot.send_document(
-                        chat_id=chat_id,
-                        document=io.BytesIO(encrypted),
-                        filename=BACKUP_FILENAME,
-                        caption=caption,
-                    )
-                    logger.warning("La copia se reemplazó creando un único mensaje nuevo (%s).", type(edit_error).__name__)
-                except Exception as exc:
-                    raise BackupError("No se pudo publicar la nueva copia; la anterior se conserva.") from exc
+                # No crear otro documento: una edición fallida no debe llenar
+                # el grupo de copias. La anterior sigue siendo recuperable y
+                # el siguiente ciclo volverá a intentar editarla.
+                logger.warning("No se actualizó la copia fijada (%s); se conserva la anterior sin crear otra.", type(edit_error).__name__)
+                raise BackupError("No se pudo editar la copia existente; la anterior se conserva.") from edit_error
         else:
             uploaded = await bot.send_document(
                 chat_id=chat_id,

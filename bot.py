@@ -2642,6 +2642,14 @@ def get_user_todus_number(user_id: int) -> str:
         if isinstance(entry, str):
             number = _normalize_todus_number(entry)
             return number if re.fullmatch(r"53\d{8}", number) else ""
+        # Fallback/migración: conservar el registro aunque el archivo separado
+        # se haya restaurado desde una copia antigua o se haya perdido.
+        users = _load_json(USERS_DATA_FILE).get("users", {})
+        user_entry = users.get(str(user_id), {}) if isinstance(users, dict) else {}
+        number = _normalize_todus_number(user_entry.get("todus_number", "")) if isinstance(user_entry, dict) else ""
+        if re.fullmatch(r"53\d{8}", number):
+            set_user_todus_number(user_id, number)
+            return number
     except Exception:
         log.error("Error leyendo número ToDus de %s", user_id, exc_info=True)
     return ""
@@ -2649,12 +2657,25 @@ def get_user_todus_number(user_id: int) -> str:
 
 def set_user_todus_number(user_id: int, number: str) -> None:
     try:
+        number = _normalize_todus_number(number)
         data = _load_json(TODUS_USERS_FILE)
         data[str(user_id)] = {
             "number": number,
             "saved_at": datetime.now(timezone.utc).isoformat(),
         }
         _save_json(TODUS_USERS_FILE, data)
+        users_data = _load_json(USERS_DATA_FILE)
+        users = users_data.get("users", {})
+        if not isinstance(users, dict):
+            users = {}
+        entry = users.get(str(user_id), {})
+        if not isinstance(entry, dict):
+            entry = {}
+        entry["todus_number"] = number
+        entry["todus_number_saved_at"] = datetime.now(timezone.utc).isoformat()
+        users[str(user_id)] = entry
+        users_data["users"] = users
+        _save_json(USERS_DATA_FILE, users_data)
     except Exception:
         log.error("Error guardando número ToDus de %s", user_id, exc_info=True)
 
@@ -4504,6 +4525,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
             if plan_key == "premium":
                 channel_lines = [
+                    "✅ ᴀᴜᴛᴏʀɪᴢᴀᴄɪóɴ ᴄᴏɴꜰɪʀᴍᴀᴅᴀ",
                     f"👤 ᴄᴏᴍᴘʀᴀᴅᴏʀ: {custom_name}",
                     f"🆔 ɪᴅ: {target_id}",
                     f"👑 ᴘʟᴀɴ: {plan['display']}",
