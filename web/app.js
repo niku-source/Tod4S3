@@ -78,13 +78,20 @@ form?.addEventListener('submit', (event) => {
   const plan = String(data.get('plan') || 'plan solicitado').trim();
   const name = String(data.get('name') || '').trim();
   const username = String(data.get('username') || '').trim() || 'No indicado';
+  const payment = String(data.get('payment') || '').trim();
+  if (!payment) {
+    form.querySelector('select[name="payment"]')?.focus();
+    return;
+  }
   const message = [
-    'Hola, deseo adquirir el plan ' + plan + '.',
+    'Hola, deseo solicitar este plan Premium:',
     '',
+    'Plan: ' + plan,
     'Nombre: ' + name,
     'Usuario de Telegram: ' + username,
+    'Método de pago: ' + payment,
     '',
-    'Pagaré/pagué por Transfermóvil o saldo móvil y enviaré la captura del comprobante por este chat para revisión y activación manual.',
+    'Realizaré el pago por el método indicado y enviaré la captura del comprobante por este chat para revisión y activación manual.',
   ].join('\n');
   window.open(`https://t.me/${TELEGRAM_HANDLE}?text=${encodeURIComponent(message)}`, '_blank', 'noopener');
   closeRequest();

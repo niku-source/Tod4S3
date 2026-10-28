@@ -4491,7 +4491,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if query.data == "open_history":
         persistent = get_task_history(user.id, 10)
-        if not persistent:
+        manager: FairTaskQueue = context.application.bot_data["task_queue"]
+        memory_jobs = [
+            job for job in manager.for_user(user.id)
+            if job.state in {"done", "error", "cancelled"}
+        ]
+        if not persistent and not memory_jobs:
             await edit_query_message_text(query.message,
                 card("📜 ʜɪꜱᴛᴏʀɪᴀʟ", ["No tienes historial", "todavía."]),
                 reply_markup=home_keyboard(),
@@ -4506,12 +4511,22 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             name = (entry.get("filename") or "Archivo")[:20]
             lines.append(f"{number}. ✅ {name}")
             lines.append(f"   {dt} · {_size_label(entry.get('size', 0), 1)}")
+        if memory_jobs:
+            if lines:
+                lines.append("")
+            lines.append("Tareas registradas en esta sesión:")
+            lines.extend(task_summary(job) for job in memory_jobs[:5])
         rows = []
         for number, entry in enumerate(persistent[:5], 1):
             name = (entry.get("filename") or "Archivo")[:18]
             urls = entry.get("urls", [])
             if urls:
                 rows.append([btn(f"📎 {number}. {name}", callback_data=f"history:view:{number - 1}")])
+        rows.extend(
+            [btn(task_state_label(job.state) + " - " + (job.filename or "Tarea")[:18],
+                 callback_data=f"j:{job.task_id}:open")]
+            for job in memory_jobs[:5]
+        )
         rows.append([btn("🗑️ ʙᴏʀʀᴀʀ ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="history:delete_menu")])
         rows.append([btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")])
         box = card("📜 ʜɪꜱᴛᴏʀɪᴀʟ", lines)

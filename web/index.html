@@ -13,7 +13,7 @@
   <meta name="theme-color" content="#07111f">
   <title>ToDus S3 · Planes de descarga</title>
   <link rel="icon" href="/brand-mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=86cc869">
+  <link rel="stylesheet" href="/styles.css?v=payment-history">
 </head>
 <body>
   <div class="ambient ambient-one" aria-hidden="true"></div>
@@ -72,21 +72,21 @@
           <h3>Premium 15</h3><p class="plan-description">Potencia total durante medio mes.</p>
           <div class="quota"><strong>∞</strong><span>descargas</span></div><div class="plan-price"><b>250 CUP</b><span>/ 15 días</span></div>
           <details class="plan-details"><summary>Ver qué incluye</summary><ul class="features"><li>Descargas sin límite</li><li>Entrega directa por ToDus</li><li>Transfermóvil o saldo móvil</li></ul></details>
-          <a class="button button-premium plan-button" data-plan="Premium 15 días · 250 CUP · Transfermóvil o saldo móvil" href="#request">Solicitar plan <span>↗</span></a>
+          <a class="button button-premium plan-button" data-plan="Premium 15 días · 250 CUP" href="#request">Solicitar plan <span>↗</span></a>
         </article>
         <article class="plan-card plan-premium offer-card offer-featured" data-plan-card>
           <div class="plan-top"><span class="plan-icon">✧</span><span class="plan-tag">OFERTA PREMIUM</span></div>
           <h3>Premium 20</h3><p class="plan-description">Acceso ilimitado con activación manual.</p>
           <div class="quota"><strong>∞</strong><span>descargas</span></div><div class="plan-price"><b>300 CUP</b><span>/ 20 días</span></div>
           <details class="plan-details"><summary>Ver qué incluye</summary><ul class="features"><li>Descargas sin límite</li><li>Entrega directa por ToDus</li><li>Transfermóvil o saldo móvil</li></ul></details>
-          <a class="button button-premium plan-button" data-plan="Premium 20 días · 300 CUP · Transfermóvil o saldo móvil" href="#request">Solicitar plan <span>↗</span></a>
+          <a class="button button-premium plan-button" data-plan="Premium 20 días · 300 CUP" href="#request">Solicitar plan <span>↗</span></a>
         </article>
         <article class="plan-card plan-medium offer-card" data-plan-card>
           <div class="plan-top"><span class="plan-icon">◇</span><span class="plan-tag">MÁS DURACIÓN</span></div>
           <h3>Premium 30</h3><p class="plan-description">Un mes completo sin límite.</p>
           <div class="quota"><strong>∞</strong><span>descargas</span></div><div class="plan-price"><b>500 CUP</b><span>/ 30 días</span></div>
           <details class="plan-details"><summary>Ver qué incluye</summary><ul class="features"><li>Descargas sin límite</li><li>Entrega directa por ToDus</li><li>Transfermóvil o saldo móvil</li></ul></details>
-          <a class="button button-premium plan-button" data-plan="Premium 30 días · 500 CUP · Transfermóvil o saldo móvil" href="#request">Solicitar plan <span>↗</span></a>
+          <a class="button button-premium plan-button" data-plan="Premium 30 días · 500 CUP" href="#request">Solicitar plan <span>↗</span></a>
         </article>
       </div>
       <p class="request-note"><span>i</span> Paga por Transfermóvil o saldo móvil y envía la captura por Telegram. La activación es manual después de verificar el comprobante.</p>
@@ -136,7 +136,8 @@
         <label>Plan seleccionado<input id="selectedPlan" name="plan" readonly></label>
         <label>Tu nombre<input name="name" required maxlength="80" placeholder="Ej. Carlos"></label>
         <label>Tu usuario de Telegram<input name="username" maxlength="50" placeholder="@usuario"></label>
-        <div class="payment-callout"><strong>Importante</strong><span>La solicitud no confirma la compra. Paga y envía la captura del comprobante por Telegram.</span></div>
+        <label>Método de pago<select name="payment" required><option value="" selected disabled>Selecciona cómo vas a pagar</option><option value="Transfermóvil">Transfermóvil</option><option value="Saldo móvil">Saldo móvil</option></select></label>
+        <div class="payment-callout"><strong>Importante</strong><span>Selecciona el método, realiza el pago y envía la captura del comprobante por Telegram. La activación es manual.</span></div>
         <button class="button button-primary" type="submit"><img src="/telegram-mark.svg" alt=""> Abrir chat privado <span>↗</span></button>
       </form>
     </section>
