@@ -95,6 +95,10 @@ CHANNEL_JOIN_URL = os.getenv("CHANNEL_JOIN_URL", "").strip() or "https://t.me/Da
 GROUP_JOIN_URL = os.getenv("GROUP_JOIN_URL", "").strip() or "https://t.me/grupozonaoscura"
 TODUS_CHANNEL_JOIN_URL = os.getenv("TODUS_CHANNEL_JOIN_URL", "").strip() or "https://t.me/darzPrbo"
 PUBLIC_CHANNEL_ID = os.getenv("PUBLIC_CHANNEL_ID", "").strip() or "@darzPrbo"
+PUBLIC_SITE_URL = os.getenv("PUBLIC_SITE_URL", "").strip().rstrip("/")
+if not PUBLIC_SITE_URL:
+    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().strip("/")
+    PUBLIC_SITE_URL = f"https://{railway_domain}" if railway_domain else ""
 # Horas que los archivos permanecen en la nube de ToDus antes del borrado
 # automático. 0 = los archivos nunca se borran solos; solo se eliminan
 # cuando el usuario o un admin lo piden explícitamente.
@@ -486,10 +490,24 @@ def blocked_user_text() -> str:
     ])
 
 
-async def publish_channel_notice(bot_obj, title: str, body: str | list[str], *, reply_markup=None) -> bool:
+async def publish_channel_notice(
+    bot_obj,
+    title: str,
+    body: str | list[str],
+    *,
+    reply_markup=None,
+    include_site_promo: bool = False,
+) -> bool:
     """Publica un aviso de actividad sin exponer IDs ni enlaces privados."""
     try:
-        lines = body.splitlines() if isinstance(body, str) else body
+        lines = list(body.splitlines() if isinstance(body, str) else body)
+        if include_site_promo and PUBLIC_SITE_URL:
+            lines.extend([
+                "",
+                "🌐 También contamos con nuestra página web:",
+                PUBLIC_SITE_URL,
+                "El bot sigue siendo gratis; los planes Premium ilimitados son opcionales.",
+            ])
         await bot_obj.send_message(
             chat_id=PUBLIC_CHANNEL_ID,
             text=card(title, lines),
@@ -2204,32 +2222,55 @@ def admin_panel_text() -> str:
 
 def admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [btn("💰 ᴅᴀʀ ꜱᴀʟᴅᴏ ᴀ ᴜɴ ɪᴅ", callback_data="admin:balance")],
         [btn("🧾 ᴅᴀʀ ᴘʀᴇᴍɪᴜᴍ ᴀ ʟᴏꜱ ᴄᴏᴍᴘʀᴀᴅᴏʀᴇꜱ", callback_data="admin:premium_menu")],
-        [btn("🆓 ᴀᴄᴛɪᴠᴀʀ ɢʀᴀᴛɪꜱ", callback_data="admin:plan:free")],
-        [btn("⭐ ᴀᴄᴛɪᴠᴀʀ ᴠɪᴘ ʙáꜱɪᴄᴏ", callback_data="admin:plan:vip_basic")],
-        [btn("💎 ᴀᴄᴛɪᴠᴀʀ ᴠɪᴘ ᴍᴇᴅɪᴏ", callback_data="admin:plan:vip_medium")],
-        [btn("🔍 ᴄᴏɴꜱᴜʟᴛᴀʀ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:check")],
-        [btn("👥 ᴜꜱᴜᴀʀɪᴏꜱ ʀᴇɢɪꜱᴛʀᴀᴅᴏꜱ", callback_data="admin:users:0")],
-        [btn("🗂️ ʜɪꜱᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:user_history")],
-        [btn("☁️ ʙᴏʀʀᴀʀ ᴛᴏᴅᴏꜱ ʟᴏꜱ ᴀʀᴄʜɪᴠᴏꜱ", callback_data="admin:cloud_all_confirm")],
-        [btn("🗑️ ʙᴏʀʀᴀʀ ᴀʀᴄʜɪᴠᴏ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:cloud_user")],
-        [btn("🧹 ʙᴏʀʀᴀʀ ᴛᴏᴅᴏ ᴇʟ ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="admin:all_history_confirm")],
-        [btn("🚫 ʙʟᴏǫᴜᴇᴀʀ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:block")],
-        [btn("🔓 ᴅᴇꜱʙʟᴏǫᴜᴇᴀʀ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:unblock")],
-        [btn("📊 ᴇꜱᴛᴀᴅíꜱᴛɪᴄᴀꜱ", callback_data="admin:stats")],
-        [btn("📈 ᴛᴏᴘ ᴅᴇ ᴜꜱᴏ", callback_data="admin:top")],
-        [btn("📢 ᴅɪꜰᴜꜱɪóɴ", callback_data="admin:broadcast")],
-        [btn("🧾 ʀᴇᴘᴏʀᴛᴇ ᴀᴄᴜᴍᴜʟᴀᴛɪᴠᴏ", callback_data="admin:report")],
-        [btn("📖 ᴛᴜᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴏ", callback_data="admin:tutorial")],
+        [btn("👥 ɢᴇꜱᴛɪóɴ ᴅᴇ ᴜꜱᴜᴀʀɪᴏꜱ", callback_data="admin:menu:users")],
+        [btn("☁️ ɴᴜʙᴇ ᴇ ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="admin:menu:storage")],
+        [btn("📊 ᴇꜱᴛᴀᴅíꜱᴛɪᴄᴀꜱ ʏ ʀᴇᴘᴏʀᴛᴇꜱ", callback_data="admin:menu:reports")],
+        [btn("🛡️ ᴍᴏᴅᴇʀᴀᴄɪóɴ", callback_data="admin:menu:moderation")],
+        [btn("📢 ᴄᴏᴍᴜɴɪᴄᴀᴄɪóɴ ʏ ᴀʏᴜᴅᴀ", callback_data="admin:menu:comms")],
         [btn("❌ ᴄᴇʀʀᴀʀ ᴘᴀɴᴇʟ", callback_data="home")],
     ])
+
+
+def admin_section_keyboard(section: str) -> InlineKeyboardMarkup:
+    sections = {
+        "users": [
+            [btn("💰 ᴅᴀʀ ꜱᴀʟᴅᴏ ᴀ ᴜɴ ɪᴅ", callback_data="admin:balance")],
+            [btn("🆓 ᴀᴄᴛɪᴠᴀʀ ɢʀᴀᴛɪꜱ", callback_data="admin:plan:free")],
+            [btn("⭐ ᴀᴄᴛɪᴠᴀʀ ᴠɪᴘ ʙáꜱɪᴄᴏ", callback_data="admin:plan:vip_basic")],
+            [btn("💎 ᴀᴄᴛɪᴠᴀʀ ᴠɪᴘ ᴍᴇᴅɪᴏ", callback_data="admin:plan:vip_medium")],
+            [btn("🔍 ᴄᴏɴꜱᴜʟᴛᴀʀ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:check")],
+            [btn("👥 ᴜꜱᴜᴀʀɪᴏꜱ ʀᴇɢɪꜱᴛʀᴀᴅᴏꜱ", callback_data="admin:users:0")],
+        ],
+        "storage": [
+            [btn("🗂️ ʜɪꜱᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:user_history")],
+            [btn("☁️ ʙᴏʀʀᴀʀ ᴛᴏᴅᴏꜱ ʟᴏꜱ ᴀʀᴄʜɪᴠᴏꜱ", callback_data="admin:cloud_all_confirm")],
+            [btn("🗑️ ʙᴏʀʀᴀʀ ᴀʀᴄʜɪᴠᴏ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:cloud_user")],
+            [btn("🧹 ʙᴏʀʀᴀʀ ᴛᴏᴅᴏ ᴇʟ ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="admin:all_history_confirm")],
+        ],
+        "reports": [
+            [btn("📊 ᴇꜱᴛᴀᴅíꜱᴛɪᴄᴀꜱ", callback_data="admin:stats")],
+            [btn("📈 ᴛᴏᴘ ᴅᴇ ᴜꜱᴏ", callback_data="admin:top")],
+            [btn("🧾 ʀᴇᴘᴏʀᴛᴇ ᴀᴄᴜᴍᴜʟᴀᴛɪᴠᴏ", callback_data="admin:report")],
+        ],
+        "moderation": [
+            [btn("🚫 ʙʟᴏǫᴜᴇᴀʀ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:block")],
+            [btn("🔓 ᴅᴇꜱʙʟᴏǫᴜᴇᴀʀ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:unblock")],
+        ],
+        "comms": [
+            [btn("📢 ᴅɪꜰᴜꜱɪóɴ", callback_data="admin:broadcast")],
+            [btn("📖 ᴛᴜᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴏ", callback_data="admin:tutorial")],
+        ],
+    }
+    rows = sections.get(section, [])
+    rows.append([btn("⬅️ ᴠᴏʟᴠᴇʀ ᴀʟ ᴘᴀɴᴇʟ", callback_data="admin:back")])
+    return InlineKeyboardMarkup(rows)
 
 
 def admin_premium_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [btn("👑 15 ᴅíᴀꜱ · 250 ᴄᴜᴘ · ꜱᴀʟᴅᴏ ᴍóᴠɪʟ", callback_data="admin:premium_offer:15")],
-        [btn("👑 20 ᴅíᴀꜱ · 600 ᴄᴜᴘ · ꜱᴀʟᴅᴏ ᴍóᴠɪʟ", callback_data="admin:premium_offer:20")],
+        [btn("👑 20 ᴅíᴀꜱ · 300 ᴄᴜᴘ · ꜱᴀʟᴅᴏ ᴍóᴠɪʟ", callback_data="admin:premium_offer:20")],
         [btn("👑 30 ᴅíᴀꜱ · 500 ᴄᴜᴘ · ꜱᴀʟᴅᴏ ᴍóᴠɪʟ", callback_data="admin:premium_offer:30")],
         [btn("⬅️ ᴠᴏʟᴠᴇʀ ᴀʟ ᴘᴀɴᴇʟ", callback_data="admin:back")],
     ])
@@ -2266,7 +2307,7 @@ def admin_tutorial_text() -> str:
         "   y el tiempo correspondiente.",
         "   Premium sin límite:",
         "   15 días / 250 CUP",
-        "   20 días / 600 CUP",
+        "   20 días / 300 CUP",
         "   30 días / 500 CUP",
         "   Todo por saldo móvil.",
         "",
@@ -2972,6 +3013,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
                     f"📦 Tamaño enviado: {_size_label(size)}",
                     "✅ Archivo entregado por ToDus.",
                 ],
+                include_site_promo=True,
             )
         else:
             await job.status_message.edit_text(
@@ -2999,6 +3041,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
                     "completadas correctamente.",
                 ],
                 reply_markup=channel_download_keyboard([url for _, url in links]),
+                include_site_promo=True,
             )
         if temp_path:
             temp_path.unlink(missing_ok=True)
@@ -3757,6 +3800,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await edit_query_message_text(query.message, admin_panel_text(), reply_markup=admin_keyboard())
             return
 
+        if query.data.startswith("admin:menu:"):
+            section = query.data.split(":", 2)[2]
+            section_titles = {
+                "users": ("👥 ɢᴇꜱᴛɪóɴ ᴅᴇ ᴜꜱᴜᴀʀɪᴏꜱ", "Planes, saldo, usuarios y consultas."),
+                "storage": ("☁️ ɴᴜʙᴇ ᴇ ʜɪꜱᴛᴏʀɪᴀʟ", "Archivos en nube, historial y limpieza."),
+                "reports": ("📊 ᴇꜱᴛᴀᴅíꜱᴛɪᴄᴀꜱ ʏ ʀᴇᴘᴏʀᴛᴇꜱ", "Uso, ranking y auditoría de planes."),
+                "moderation": ("🛡️ ᴍᴏᴅᴇʀᴀᴄɪóɴ", "Bloqueo y desbloqueo de usuarios."),
+                "comms": ("📢 ᴄᴏᴍᴜɴɪᴄᴀᴄɪóɴ ʏ ᴀʏᴜᴅᴀ", "Difusión y tutorial de administración."),
+            }
+            title, subtitle = section_titles.get(section, ("⚙️ ᴘᴀɴᴇʟ ᴅᴇ ᴀᴅᴍɪɴ", "Selecciona una función."))
+            await edit_query_message_text(query.message, card(title, [subtitle, "", "Selecciona una acción:"]), reply_markup=admin_section_keyboard(section))
+            return
+
         if query.data == "admin:balance":
             context.user_data["admin_state"] = {"step": "awaiting_balance_user_id"}
             await edit_query_message_text(query.message,
@@ -4100,7 +4156,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         if query.data.startswith("admin:premium_offer:"):
             days = int(query.data.split(":")[-1])
-            prices = {15: "250 CUP", 20: "600 CUP", 30: "500 CUP"}
+            prices = {15: "250 CUP", 20: "300 CUP", 30: "500 CUP"}
             if days not in prices:
                 return
             context.user_data["admin_state"] = {"step": "awaiting_user_id", "plan": "premium", "days": days}
@@ -4166,7 +4222,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             context.user_data.pop("admin_state", None)
 
             entry = set_user_plan(target_id, plan_key, days if days > 0 else None)
-            offer_prices = {15: 250, 20: 600, 30: 500}
+            offer_prices = {15: 250, 20: 300, 30: 500}
             price_cup = offer_prices.get(days) if plan_key == "premium" else None
             record_admin_audit(
                 user.id,

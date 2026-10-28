@@ -29,7 +29,15 @@ class StoreHandler(SimpleHTTPRequestHandler):
         if path == "/manus-routes.json":
             self.path = "/manus-routes.json"
         elif path == "/":
-            self.path = "/index.html"
+            origin = f"{self.headers.get('X-Forwarded-Proto', 'https').split(',')[0].strip()}://{self.headers.get('Host', '')}"
+            body = (WEB_ROOT / "index.html").read_bytes().replace(b"__SITE_ORIGIN__", origin.encode("utf-8"))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         super().do_GET()
 
     def do_HEAD(self):  # noqa: N802
