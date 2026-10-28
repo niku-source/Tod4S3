@@ -765,10 +765,20 @@ def registered_user_ids() -> list[int]:
     ids: set[int] = set()
     users = _load_json(USERS_DATA_FILE).get("users", {})
     if isinstance(users, dict):
-        ids.update(int(uid) for uid in users if str(uid).lstrip("-").isdigit())
+        for uid in users:
+            if str(uid).lstrip("-").isdigit():
+                try:
+                    ids.add(int(uid))
+                except (TypeError, ValueError):
+                    pass
     for path in (PLAN_DATA_FILE, USAGE_DATA_FILE, HISTORY_DATA_FILE):
         data = _load_json(path)
-        ids.update(int(uid) for uid in data if str(uid).lstrip("-").isdigit())
+        for uid in data:
+            if str(uid).lstrip("-").isdigit():
+                try:
+                    ids.add(int(uid))
+                except (TypeError, ValueError):
+                    pass
     return sorted(uid for uid in ids if not is_owner(uid) and uid > 0)
 
 
@@ -1146,10 +1156,13 @@ def save_task_history(user_id: int, task_data: dict) -> None:
 
 
 def get_task_history(user_id: int, limit: int = 10) -> list[dict]:
-    """Obtiene el historial de tareas de un usuario."""
+    """Obtiene el historial de tareas para un usuario."""
     try:
         data = _load_json(HISTORY_DATA_FILE)
-        return data.get(str(user_id), [])[:limit]
+        entries = data.get(str(user_id), [])
+        if not isinstance(entries, list):
+            return []
+        return [entry for entry in entries if isinstance(entry, dict)][:limit]
     except Exception as e:
         log.error(f"Error leyendo historial de {user_id}: {e}")
         return []
@@ -1313,9 +1326,10 @@ def reset_user_daily_usage(user_id: int) -> bool:
 
 
 def admin_user_history_text(user_id: int) -> str:
-    entries = all_task_history().get(str(user_id), [])
-    entries = entries if isinstance(entries, list) else []
+    entries = get_task_history(user_id, 50)
     user_entry = _load_json(USERS_DATA_FILE).get("users", {}).get(str(user_id), {})
+    if not isinstance(user_entry, dict):
+        user_entry = {}
     full_name = user_entry.get("full_name") or user_entry.get("first_name") or "Sin nombre"
     username = user_entry.get("username") or "sin @usuario"
     username = username if str(username).startswith("@") else f"@{username}"
@@ -1361,11 +1375,13 @@ def admin_registered_users_text(page: int = 0, page_size: int = 10) -> str:
         lines.append("No hay usuarios en esta página.")
     for number, user_id in enumerate(selected, start + 1):
         entry = users.get(str(user_id), {})
-        full_name = (entry.get("full_name") or entry.get("first_name") or "Sin nombre").strip()
-        username = entry.get("username") or "sin @usuario"
+        if not isinstance(entry, dict):
+            entry = {}
+        full_name = str(entry.get("full_name") or entry.get("first_name") or "Sin nombre").strip()
+        username = str(entry.get("username") or "sin @usuario")
         username = username if str(username).startswith("@") else f"@{username}"
         records = history.get(str(user_id), [])
-        records = records if isinstance(records, list) else []
+        records = [record for record in records if isinstance(record, dict)] if isinstance(records, list) else []
         lines.extend([
             f"╭─ USER {number - start}",
             f"┃ 👤 {full_name}",
@@ -3531,6 +3547,10 @@ async def send_service_info_message(message, user_id: int, user_name: str,
 async def edit_query_message_text(message, text: str, **kwargs):
     """Edita caption si el menú actual es una foto; texto en cualquier otro caso."""
     if getattr(message, "photo", None) and hasattr(message, "edit_caption"):
+        # Telegram no acepta disable_web_page_preview en editMessageCaption.
+        # Se usa en varias pantallas de texto, pero debe quitarse al editar
+        # la bienvenida que está publicada como foto.
+        kwargs.pop("disable_web_page_preview", None)
         return await message.edit_caption(caption=text, **kwargs)
     return await message.edit_text(text, **kwargs)
 
@@ -4198,7 +4218,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
 
         if query.data.startswith("admin:users:"):
-            page = max(0, int(query.data.split(":")[-1]))
+            try:
+                page = max(0, int(query.data.split(":")[-1]))
+            except (TypeError, ValueError):
+                await query.answer(sc("Página inválida"), show_alert=True)
+                return
+            await query.answer()
             await edit_query_message_text(query.message,
                 admin_registered_users_text(page),
                 reply_markup=admin_registered_users_keyboard(page),
