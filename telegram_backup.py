@@ -553,6 +553,14 @@ def _pinned_backup(chat: Any) -> Any | None:
     return message if is_backup_message(message) else None
 
 
+def _pinned_document_candidate(chat: Any) -> Any | None:
+    """Devuelve un mensaje fijado con documento cuando Telegram omitió metadatos."""
+    message = getattr(chat, "pinned_message", None)
+    if message is not None and getattr(message, "message_id", None) and getattr(message, "document", None):
+        return message
+    return None
+
+
 def _message_with_id(message_id: int | None) -> Any | None:
     """Crea una referencia mínima para editar un mensaje conocido por su ID."""
     if not message_id:
@@ -617,10 +625,17 @@ async def backup_to_telegram(
     old_message = None
     old_message_id = None
     previous_snapshot = None
+    fallback_pinned_candidate = False
     try:
         try:
             chat = await bot.get_chat(chat_id)
             old_message = _pinned_backup(chat)
+            if old_message is None:
+                # Algunas respuestas de Bot API no conservan file_name/caption.
+                # El mensaje fijado con documento sigue siendo el candidato único;
+                # la validación cifrada posterior decidirá si es nuestro respaldo.
+                old_message = _pinned_document_candidate(chat)
+                fallback_pinned_candidate = old_message is not None
             old_message_id = (
                 getattr(old_message, "message_id", None)
                 if old_message is not None
@@ -632,16 +647,21 @@ async def backup_to_telegram(
                 # mensaje y evita publicar una copia nueva en cada actualización.
                 old_message = _message_with_id(old_message_id)
         except Exception as exc:
-            # Un fallo temporal de getChat no debe impedir una copia nueva.
-            # sendDocument/pin se intentarán igualmente y conservarán el ID.
+            # No crear otra copia si no se puede consultar el mensaje existente.
+            # Un reintento posterior editará la copia única cuando Telegram responda.
             old_message = None
             old_message_id = _read_message_pointer(layout)
-            logger.warning("No se pudo leer el mensaje fijado (%s); se intentará publicar una copia nueva.", type(exc).__name__)
+            if not old_message_id:
+                logger.error("No se pudo localizar la copia anterior (%s); se cancela sin publicar otra.", type(exc).__name__)
+                raise BackupError("No se pudo localizar la copia existente; no se creará otra.") from exc
+            logger.warning("No se pudo leer el mensaje fijado (%s); se reintentará editar message_id=%s.", type(exc).__name__, old_message_id)
         if old_message is not None:
             try:
                 previous_snapshot = await _download_message(bot, old_message, bot_token)
             except BackupError as exc:
                 logger.warning("La copia fijada anterior no se pudo validar (%s); se conserva.", type(exc).__name__)
+                if fallback_pinned_candidate:
+                    raise BackupError("El mensaje fijado no es una copia válida; se conserva sin modificar.") from exc
 
         encrypted, snapshot, total_bytes, file_count = build_encrypted_backup(
             layout,
