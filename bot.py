@@ -2205,12 +2205,10 @@ def admin_panel_text() -> str:
 def admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [btn("💰 ᴅᴀʀ ꜱᴀʟᴅᴏ ᴀ ᴜɴ ɪᴅ", callback_data="admin:balance")],
+        [btn("🧾 ᴅᴀʀ ᴘʀᴇᴍɪᴜᴍ ᴀ ʟᴏꜱ ᴄᴏᴍᴘʀᴀᴅᴏʀᴇꜱ", callback_data="admin:premium_menu")],
         [btn("🆓 ᴀᴄᴛɪᴠᴀʀ ɢʀᴀᴛɪꜱ", callback_data="admin:plan:free")],
         [btn("⭐ ᴀᴄᴛɪᴠᴀʀ ᴠɪᴘ ʙáꜱɪᴄᴏ", callback_data="admin:plan:vip_basic")],
         [btn("💎 ᴀᴄᴛɪᴠᴀʀ ᴠɪᴘ ᴍᴇᴅɪᴏ", callback_data="admin:plan:vip_medium")],
-        [btn("👑 ᴘʀᴇᴍɪᴜᴍ · 15 ᴅíᴀꜱ / 250 ᴄᴜᴘ", callback_data="admin:premium_offer:15")],
-        [btn("👑 ᴘʀᴇᴍɪᴜᴍ · 20 ᴅíᴀꜱ / 600 ᴄᴜᴘ", callback_data="admin:premium_offer:20")],
-        [btn("👑 ᴘʀᴇᴍɪᴜᴍ · 30 ᴅíᴀꜱ / 500 ᴄᴜᴘ", callback_data="admin:premium_offer:30")],
         [btn("🔍 ᴄᴏɴꜱᴜʟᴛᴀʀ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:check")],
         [btn("👥 ᴜꜱᴜᴀʀɪᴏꜱ ʀᴇɢɪꜱᴛʀᴀᴅᴏꜱ", callback_data="admin:users:0")],
         [btn("🗂️ ʜɪꜱᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:user_history")],
@@ -2225,6 +2223,15 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         [btn("🧾 ʀᴇᴘᴏʀᴛᴇ ᴀᴄᴜᴍᴜʟᴀᴛɪᴠᴏ", callback_data="admin:report")],
         [btn("📖 ᴛᴜᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴏ", callback_data="admin:tutorial")],
         [btn("❌ ᴄᴇʀʀᴀʀ ᴘᴀɴᴇʟ", callback_data="home")],
+    ])
+
+
+def admin_premium_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("👑 15 ᴅíᴀꜱ · 250 ᴄᴜᴘ · ꜱᴀʟᴅᴏ ᴍóᴠɪʟ", callback_data="admin:premium_offer:15")],
+        [btn("👑 20 ᴅíᴀꜱ · 600 ᴄᴜᴘ · ꜱᴀʟᴅᴏ ᴍóᴠɪʟ", callback_data="admin:premium_offer:20")],
+        [btn("👑 30 ᴅíᴀꜱ · 500 ᴄᴜᴘ · ꜱᴀʟᴅᴏ ᴍóᴠɪʟ", callback_data="admin:premium_offer:30")],
+        [btn("⬅️ ᴠᴏʟᴠᴇʀ ᴀʟ ᴘᴀɴᴇʟ", callback_data="admin:back")],
     ])
 
 
@@ -3761,6 +3768,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     "y confirmarás la operación.",
                 ]),
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
+            )
+            return
+
+        if query.data == "admin:premium_menu":
+            await edit_query_message_text(query.message,
+                card("🧾 ᴘʟᴀɴᴇꜱ ᴅᴇ ᴄᴏᴍᴘʀᴀᴅᴏʀᴇꜱ", [
+                    "Revisa primero la captura",
+                    "del pago en saldo móvil.",
+                    "",
+                    "Después selecciona la oferta",
+                    "y escribe el ID del usuario.",
+                    "Todas incluyen descargas sin límite.",
+                ]),
+                reply_markup=admin_premium_keyboard(),
             )
             return
 
