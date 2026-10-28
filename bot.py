@@ -969,7 +969,7 @@ def admin_leaderboard_text(limit: int = 20) -> str:
 
 
 def get_remaining_quota(user_id: int) -> int:
-    if is_owner(user_id):
+    if is_owner(user_id) or get_user_plan(user_id) == "premium":
         return 10**18
     users = _load_json(USERS_DATA_FILE).get("users", {})
     entry = users.get(str(user_id), {}) if isinstance(users, dict) else {}
@@ -983,6 +983,8 @@ def get_remaining_quota(user_id: int) -> int:
 
 def data_quota_label(size: int) -> str:
     size = max(0, int(size))
+    if size >= 10**17:
+        return "∞ GB"
     if size >= GIB:
         return f"{size / GIB:.2f} GB"
     return f"{size / MIB:.0f} MB"
@@ -990,7 +992,7 @@ def data_quota_label(size: int) -> str:
 
 def reserve_data_quota(application: Application, user_id: int, task_id: str, file_bytes: int) -> tuple[bool, str]:
     """Reserve quota before upload to prevent concurrent tasks from overspending it."""
-    if is_owner(user_id):
+    if is_owner(user_id) or get_user_plan(user_id) == "premium":
         return True, ""
     reservations = application.bot_data.setdefault("data_quota_reservations", {})
     key = (int(user_id), str(task_id))
