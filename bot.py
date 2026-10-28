@@ -2352,7 +2352,7 @@ def admin_tutorial_text() -> str:
 #  PÁGINAS DE AYUDA
 # ═══════════════════════════════════════════════════════════════
 HELP_PAGES = [
-    ("📘 ɢᴜíᴀ ʀáᴘɪᴅᴀ 1/4", [
+    ("📘 ɢᴜíᴀ ʀáᴘɪᴅᴀ 1/6", [
         "¿Qué hace este bot?",
         "",
         "Sube tus archivos a",
@@ -2366,7 +2366,7 @@ HELP_PAGES = [
         "👥 Funciona por referidos.",
         "💎 Comprar Premium es opcional.",
     ]),
-    ("📁 ᴇɴᴠɪᴀʀ ᴀʀᴄʜɪᴠᴏꜱ 2/4", [
+    ("📁 ᴇɴᴠɪᴀʀ ᴀʀᴄʜɪᴠᴏꜱ 2/6", [
         "Paso a paso:",
         "",
         "1️⃣ Pulsa Descargas",
@@ -2377,7 +2377,7 @@ HELP_PAGES = [
         "Soporta videos, audios,",
         "documentos y fotos.",
     ]),
-    ("🔗 ᴇɴᴠɪᴀʀ ᴇɴʟᴀᴄᴇꜱ 3/4", [
+    ("🔗 ᴇɴᴠɪᴀʀ ᴇɴʟᴀᴄᴇꜱ 3/6", [
         "Paso a paso:",
         "",
         "1️⃣ Pulsa Descargas",
@@ -2390,7 +2390,7 @@ HELP_PAGES = [
         "Hasta 20 enlaces por",
         "mensaje.",
     ]),
-    ("💡 ᴛɪᴘꜱ ʏ ᴄᴏᴍᴀɴᴅᴏꜱ 4/4", [
+    ("💡 ᴛɪᴘꜱ ʏ ᴄᴏᴍᴀɴᴅᴏꜱ 4/6", [
         "Comandos útiles:",
         "",
         "/cola · tareas activas",
@@ -2400,7 +2400,7 @@ HELP_PAGES = [
         "",
         "Dudas: Pulsa Soporte.",
     ]),
-    ("📱 ᴛᴏᴅᴜꜱS3 ʙᴏᴛ · ᴛᴜᴛᴏʀɪᴀʟ 5/5", [
+    ("📱 ᴛᴏᴅᴜꜱS3 ʙᴏᴛ · ᴛᴜᴛᴏʀɪᴀʟ 5/6", [
         "Descarga con ToDusS3 Bot:",
         "",
         "1️⃣ Envía un enlace al bot",
@@ -2414,6 +2414,20 @@ HELP_PAGES = [
         "Los archivos llegan directamente",
         "a tu chat de ToDus.",
     ]),
+    ("🌐 ᴄᴏᴍᴘʀᴀʀ ᴜɴ ᴘʟᴀɴ 6/6", [
+        "Los planes Premium son opcionales.",
+        "",
+        "1️⃣ Abre la web de planes",
+        "2️⃣ Elige la oferta que quieras",
+        "3️⃣ Pulsa Adquirir este plan",
+        "4️⃣ Se abrirá el chat privado",
+        "   con @Niku_Blade",
+        "5️⃣ Envía tu ID y comprobante",
+        "   por Transfermóvil o saldo móvil",
+        "",
+        "La activación la realiza el admin",
+        "después de verificar el pago.",
+    ]),
 ]
 
 
@@ -2423,7 +2437,14 @@ def help_keyboard(page: int) -> InlineKeyboardMarkup:
         row.append(btn("⬅️ ᴀɴᴛᴇʀɪᴏʀ", callback_data=f"help:{page - 1}"))
     if page < len(HELP_PAGES) - 1:
         row.append(btn("➡️ ꜱɪɢᴜɪᴇɴᴛᴇ", callback_data=f"help:{page + 1}"))
-    return InlineKeyboardMarkup([row, [btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")]])
+    rows = [row]
+    if page == len(HELP_PAGES) - 1:
+        rows.append([
+            btn("🌐 ᴡᴇʙ ᴅᴇ ᴘʟᴀɴᴇꜱ", url="https://tod4s3-production.up.railway.app/#inicio"),
+            btn("💬 ᴄᴏɴᴛᴀᴄᴛᴀʀ ᴀᴅᴍɪɴ", url="https://t.me/Niku_Blade"),
+        ])
+    rows.append([btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")])
+    return InlineKeyboardMarkup(rows)
 
 
 def help_page_text(page: int) -> str:
