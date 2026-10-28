@@ -58,7 +58,7 @@ def _cnv_youtube_download(
     url: str,
     folder: Path,
     *,
-    max_bytes: int,
+    max_bytes: int | None,
     max_duration_seconds: int,
     progress_hook=None,
     is_cancelled=None,
@@ -118,7 +118,7 @@ def _cnv_youtube_download(
     ) as response:
         response.raise_for_status()
         total = int(response.headers.get("content-length") or 0)
-        if max_bytes > 0 and total > max_bytes:
+        if max_bytes and total > max_bytes:
             raise ValueError(f"El vídeo supera el límite de {max_bytes} bytes.")
         with target.open("wb") as handle:
             for chunk in response.iter_content(chunk_size=1 << 16):
@@ -129,7 +129,7 @@ def _cnv_youtube_download(
                 if not chunk:
                     continue
                 received += len(chunk)
-                if max_bytes > 0 and received > max_bytes:
+                if max_bytes and received > max_bytes:
                     raise ValueError(f"El vídeo supera el límite de {max_bytes} bytes.")
                 handle.write(chunk)
                 if progress_hook:
@@ -205,7 +205,7 @@ def download_platform_video(
     url: str,
     output_dir: str | Path,
     *,
-    max_bytes: int,
+    max_bytes: int | None,
     max_duration_seconds: int = 24 * 60 * 60,
     progress_hook=None,
     is_cancelled=None,
@@ -263,7 +263,7 @@ def download_platform_video(
         if is_cancelled and is_cancelled():
             raise DownloadError("Descarga cancelada.")
         downloaded = int(data.get("downloaded_bytes") or 0)
-        if max_bytes > 0 and downloaded > max_bytes:
+        if max_bytes and downloaded > max_bytes:
             raise DownloadError(f"El vídeo supera el límite de {max_bytes} bytes.")
         if progress_hook and data.get("status") == "downloading":
             total = int(data.get("total_bytes") or data.get("total_bytes_estimate") or 0)
@@ -276,7 +276,6 @@ def download_platform_video(
         "merge_output_format": "mp4",
         "outtmpl": str(folder / "%(title).160B [%(id)s].%(ext)s"),
         "noplaylist": True,
-        "max_filesize": max_bytes,
         "socket_timeout": 30,
         "retries": 3,
         "fragment_retries": 3,
@@ -292,6 +291,8 @@ def download_platform_video(
         # resolver firmas y formatos. Docker instala Node.js y yt-dlp-ejs.
         "js_runtimes": {"node": {}},
     }
+    if max_bytes:
+        base_options["max_filesize"] = max_bytes
     try:
         with YoutubeDL(base_options) as downloader:
             downloader.extract_info(url, download=True)
@@ -350,6 +351,6 @@ def download_platform_video(
     size = video_path.stat().st_size
     if size <= 0:
         raise ValueError("La plataforma devolvió un archivo vacío.")
-    if max_bytes > 0 and size > max_bytes:
+    if max_bytes and size > max_bytes:
         raise ValueError(f"El vídeo supera el límite de {max_bytes} bytes.")
     return video_path, video_path.name, size
