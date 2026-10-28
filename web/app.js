@@ -84,7 +84,7 @@ form?.addEventListener('submit', (event) => {
     'Nombre: ' + name,
     'Usuario de Telegram: ' + username,
     '',
-    'Pagaré/pagué en saldo móvil y enviaré la captura del comprobante por este chat para revisión y activación manual.',
+    'Pagaré/pagué por Transfermóvil o saldo móvil y enviaré la captura del comprobante por este chat para revisión y activación manual.',
   ].join('\n');
   window.open(`https://t.me/${TELEGRAM_HANDLE}?text=${encodeURIComponent(message)}`, '_blank', 'noopener');
   closeRequest();
