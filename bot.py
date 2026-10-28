@@ -98,7 +98,7 @@ TODUS_CHANNEL_JOIN_URL = os.getenv("TODUS_CHANNEL_JOIN_URL", "").strip() or "htt
 PUBLIC_CHANNEL_ID = (
     os.getenv("PUBLIC_CHANNEL_ID", "").strip()
     or os.getenv("PUBLIC_TELEGRAM_CHANNEL_ID", "").strip()
-    or os.getenv("TELEGRAM_CHANNEL_ID", "").strip()
+    or os.getenv("REQUIRED_TODUS_CHANNEL", "").strip()
     or "@darzPrbo"
 )
 PUBLIC_SITE_URL = os.getenv("PUBLIC_SITE_URL", "").strip().rstrip("/")
