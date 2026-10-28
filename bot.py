@@ -3141,13 +3141,16 @@ async def process_task(job: TransferTask, application: Application) -> None:
             return
 
         force_chat_delivery = job.compress_after_download
+        # El tamaño configurable se mantiene para el modo chat, pero ToDus
+        # usa partes pequeñas para reducir fallos durante la descarga y unión.
         part_size = env_int("MAX_PART_SIZE_MIB", 1900) * MIB
         if (DELIVERY_MODE == "chat" or force_chat_delivery) and not application.bot_data.get("local_bot_api", False):
             # Sin un servidor local de Bot API, el límite de documentos es 50 MiB.
             part_size = min(part_size, BOT_API_SEND_LIMIT - 2 * MIB)
         if DELIVERY_MODE == "todus":
-            # Límite conservador de la app ToDus por archivo.
-            part_size = min(part_size, 950 * MIB)
+            # 250 MiB por parte: no comprime el archivo, pero hace más estable
+            # la descarga y la reconstrucción en teléfonos con conexión irregular.
+            part_size = min(part_size, 250 * MIB)
         if not job.part_paths or any(not Path(p).exists() for p in job.part_paths):
             part_dir = Path(os.getenv("TMPDIR", "/tmp")) / f"jk-task-{job.task_id}"
             parts = await asyncio.to_thread(split_into_parts, temp_path, filename, part_dir, part_size)
@@ -3274,8 +3277,9 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 "Ábrelo en ToDus y púlsalo",
                 "para descargarlo (tráfico nacional).",
                 "Si ves .part001, .part002, etc.,",
-                "descarga todas y únelas con ZArchiver",
-                "usando la opción Unir/Combinar partes.",
+                "descarga todas antes de unirlas; no",
+                "intentes extraer una parte por separado.",
+                "En ZArchiver usa Unir/Combinar partes.",
             ]))
             await publish_channel_notice(
                 application.bot,
