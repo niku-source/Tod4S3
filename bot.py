@@ -5089,6 +5089,11 @@ async def post_shutdown(application: Application) -> None:
 
 
 def main() -> None:
+    try:
+        from web_store import start_store_server
+        start_store_server()
+    except Exception:
+        log.exception("No se pudo iniciar la tienda web de Railway")
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN.strip()
     if not token:
         raise RuntimeError("Falta TELEGRAM_BOT_TOKEN en el entorno o archivo")
