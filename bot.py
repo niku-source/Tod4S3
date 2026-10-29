@@ -915,22 +915,103 @@ def admin_report_text() -> str:
     return card("🧾 ʀᴇᴘᴏʀᴛᴇ ᴀᴄᴜᴍᴜʟᴀᴛɪᴠᴏ", lines) + f"\n\n{BOT_FOOTER}"
 
 
-async def broadcast_admin_message(bot_obj, body: str) -> tuple[int, int, int]:
-    """Envía un mensaje del administrador a todos los usuarios conocidos."""
+def broadcast_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[btn("Cancelar", callback_data="admin:broadcast:cancel")]])
+
+
+def broadcast_media_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("Sin foto ni archivo", callback_data="admin:broadcast:skip_media")],
+        [btn("Cancelar", callback_data="admin:broadcast:cancel")],
+    ])
+
+
+def broadcast_button_choice_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("Añadir botón", callback_data="admin:broadcast:add_button"),
+         btn("Sin botón", callback_data="admin:broadcast:no_button")],
+        [btn("Cancelar", callback_data="admin:broadcast:cancel")],
+    ])
+
+
+def broadcast_confirmation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("Enviar a todos", callback_data="admin:broadcast:send")],
+        [btn("Cancelar", callback_data="admin:broadcast:cancel")],
+    ])
+
+
+def broadcast_preview_text(state: dict) -> str:
+    body = str(state.get("body", ""))
+    preview_body = body if len(body) <= 1800 else body[:1800] + "…\n[Vista previa recortada]"
+    media_type = state.get("media_type")
+    if media_type == "photo":
+        attachment = "Foto"
+    elif media_type == "document":
+        attachment = f"Archivo: {state.get('media_name') or 'documento'}"
+    else:
+        attachment = "Ninguno"
+    button_label = str(state.get("button_label", "")).strip()
+    button_url = str(state.get("button_url", "")).strip()
+    button = f"{button_label} → {button_url}" if button_label and button_url else "Ninguno"
+    return "\n".join([
+        "🔎 VISTA PREVIA DE DIFUSIÓN",
+        "",
+        preview_body,
+        "",
+        f"Adjunto: {attachment}",
+        f"Botón: {button}",
+        "",
+        "Pulsa Enviar a todos para confirmar.",
+    ])
+
+
+def valid_broadcast_button_url(value: str) -> bool:
+    if not value or len(value) > 2048 or any(ch.isspace() for ch in value):
+        return False
+    try:
+        parsed = urlsplit(value)
+        valid_host = bool(parsed.hostname)
+        _ = parsed.port  # Fuerza la validación de un puerto mal formado.
+        return parsed.scheme.lower() in {"http", "https"} and valid_host and not parsed.username and not parsed.password
+    except Exception:
+        return False
+
+
+async def broadcast_admin_message(
+    bot_obj,
+    body: str,
+    *,
+    media_type: str | None = None,
+    media_file_id: str | None = None,
+    button_label: str | None = None,
+    button_url: str | None = None,
+) -> tuple[int, int, int]:
+    """Envía texto y, opcionalmente, un adjunto y un botón a usuarios conocidos."""
     targets = registered_user_ids()
     sent = failed = 0
+    keyboard = None
+    if button_label and button_url:
+        keyboard = InlineKeyboardMarkup([[btn(button_label, url=button_url)]])
     for target_id in targets:
         try:
             await bot_obj.send_message(
                 chat_id=target_id,
-                text=card("📢 ᴍᴇɴꜱᴀᴊᴇ ᴅᴇʟ ᴀᴅᴍɪɴɪꜱᴛʀᴀᴅᴏʀ", [body]),
+                text=f"📢 Mensaje del administrador\n\n{body}",
+                parse_mode=None,
+                reply_markup=keyboard,
                 disable_web_page_preview=True,
             )
+            if media_file_id and media_type == "photo":
+                await bot_obj.send_photo(chat_id=target_id, photo=media_file_id)
+            elif media_file_id and media_type == "document":
+                await bot_obj.send_document(chat_id=target_id, document=media_file_id)
             sent += 1
-        except Exception:
+        except Exception as exc:
             failed += 1
+            log.warning("Falló la difusión a %s (%s)", target_id, type(exc).__name__)
         # Evita disparar demasiadas solicitudes consecutivas contra Telegram.
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.10 if media_file_id else 0.05)
     return len(targets), sent, failed
 
 
@@ -4047,6 +4128,89 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.message.reply_text(blocked_user_text())
         return
     register_user(user)
+    if query.data.startswith("admin:broadcast:"):
+        chat = update.effective_chat
+        if not is_owner(user.id) or not chat or chat.type != "private":
+            await query.answer(sc("Acción solo para el administrador"), show_alert=True)
+            return
+        action = query.data.rsplit(":", 1)[-1]
+        state = context.user_data.get("admin_state")
+        if action == "cancel":
+            context.user_data.pop("admin_state", None)
+            await query.answer()
+            await edit_query_message_text(
+                query.message,
+                card("❌ ᴅɪꜰᴜꜱɪóɴ ᴄᴀɴᴄᴇʟᴀᴅᴀ", ["No se envió ningún mensaje."]),
+                reply_markup=InlineKeyboardMarkup([[btn("Volver al panel", callback_data="admin:back")]]),
+            )
+            return
+        if not isinstance(state, dict):
+            await query.answer(sc("No hay una difusión activa"), show_alert=True)
+            return
+        if action == "skip_media" and state.get("step") == "broadcast_media":
+            state.update({"step": "broadcast_button_choice", "media_type": None,
+                          "media_file_id": None, "media_name": None})
+            context.user_data["admin_state"] = state
+            await query.answer()
+            await edit_query_message_text(
+                query.message,
+                card("🔘 ʙᴏᴛóɴ ᴅᴇ ᴅɪꜰᴜꜱɪóɴ", ["¿Quieres añadir un botón con enlace?"]),
+                reply_markup=broadcast_button_choice_keyboard(),
+            )
+            return
+        if action == "add_button" and state.get("step") == "broadcast_button_choice":
+            state["step"] = "broadcast_button_label"
+            context.user_data["admin_state"] = state
+            await query.answer()
+            await edit_query_message_text(
+                query.message,
+                card("🔘 ᴛᴇxᴛᴏ ᴅᴇʟ ʙᴏᴛóɴ", ["Escribe ahora la etiqueta del botón (máximo 64 caracteres)."]),
+                reply_markup=broadcast_cancel_keyboard(),
+            )
+            return
+        if action == "no_button" and state.get("step") == "broadcast_button_choice":
+            state.update({"step": "broadcast_confirm", "button_label": None, "button_url": None})
+            context.user_data["admin_state"] = state
+            await query.answer()
+            await edit_query_message_text(
+                query.message,
+                broadcast_preview_text(state),
+                parse_mode=None,
+                reply_markup=broadcast_confirmation_keyboard(),
+            )
+            return
+        if action == "send" and state.get("step") == "broadcast_confirm":
+            body = str(state.get("body", "")).strip()
+            if not body:
+                await query.answer(sc("Falta el texto de la difusión"), show_alert=True)
+                return
+            button_label = str(state.get("button_label", "")).strip() or None
+            button_url = str(state.get("button_url", "")).strip() or None
+            if bool(button_label) != bool(button_url) or (button_url and not valid_broadcast_button_url(button_url)):
+                await query.answer(sc("La configuración del botón no es válida"), show_alert=True)
+                return
+            context.user_data.pop("admin_state", None)
+            await query.answer(sc("Difusión iniciada"))
+            total, sent, failed = await broadcast_admin_message(
+                context.bot,
+                body,
+                media_type=state.get("media_type"),
+                media_file_id=state.get("media_file_id"),
+                button_label=button_label,
+                button_url=button_url,
+            )
+            await edit_query_message_text(
+                query.message,
+                card("📢 ᴅɪꜰᴜꜱɪóɴ ᴛᴇʀᴍɪɴᴀᴅᴀ", [
+                    f"Registrados: {total}",
+                    f"Entregados: {sent}",
+                    f"No entregados: {failed}",
+                ]),
+                reply_markup=InlineKeyboardMarkup([[btn("Volver al panel", callback_data="admin:back")]]),
+            )
+            return
+        await query.answer(sc("Completa primero el paso actual"), show_alert=True)
+        return
     if query.data == "app:pair":
         await query.answer()
         if not await ensure_membership(update, context):
@@ -4569,17 +4733,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
 
         if query.data == "admin:broadcast":
-            context.user_data["admin_state"] = {"step": "broadcast_message"}
+            context.user_data["admin_state"] = {"step": "broadcast_text"}
+            await query.answer()
             await edit_query_message_text(query.message,
                 card("📢 ᴅɪꜰᴜꜱɪóɴ", [
-                    "Escribe el mensaje que",
-                    "recibirán los usuarios",
-                    "registrados en el bot.",
+                    "Escribe el texto que recibirán",
+                    "los usuarios registrados (hasta 3500 caracteres).",
                     "",
-                    "Se enviará como:",
-                    "Mensaje del administrador",
+                    "Después podrás adjuntar una foto o APK",
+                    "y añadir opcionalmente un botón con enlace.",
+                    "La difusión no saldrá hasta que la confirmes.",
                 ]),
-                reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
+                reply_markup=broadcast_cancel_keyboard(),
             )
             return
 
@@ -5267,6 +5432,73 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if admin_state and is_owner(user.id):
         step = admin_state.get("step")
 
+        if step == "broadcast_text":
+            body = text[:3500].strip()
+            if not body:
+                await message.reply_text(sc("Escribe un texto para la difusión."), reply_markup=broadcast_cancel_keyboard())
+                return
+            context.user_data["admin_state"] = {"step": "broadcast_media", "body": body}
+            await message.reply_text(
+                card("📎 ᴀᴅᴊᴜɴᴛᴏ ᴏᴘᴄɪᴏɴᴀʟ", [
+                    "Ahora puedes enviar una foto o un documento, por ejemplo el APK.",
+                    "Si quieres texto solamente, pulsa Sin foto ni archivo.",
+                ]),
+                reply_markup=broadcast_media_keyboard(),
+            )
+            return
+
+        if step == "broadcast_media":
+            await message.reply_text(
+                sc("Envía una foto o un documento/APK, o pulsa «Sin foto ni archivo»."),
+                reply_markup=broadcast_media_keyboard(),
+            )
+            return
+
+        if step == "broadcast_button_choice":
+            await message.reply_text(
+                sc("Elige si quieres añadir un botón con enlace."),
+                reply_markup=broadcast_button_choice_keyboard(),
+            )
+            return
+
+        if step == "broadcast_button_label":
+            label = text.strip()
+            if not label or len(label) > 64:
+                await message.reply_text(sc("La etiqueta debe tener entre 1 y 64 caracteres. Inténtalo de nuevo."), reply_markup=broadcast_cancel_keyboard())
+                return
+            admin_state.update({"step": "broadcast_button_url", "button_label": label})
+            context.user_data["admin_state"] = admin_state
+            await message.reply_text(
+                f"🔗 Enlace del botón\nTexto: {label}\nEnvía la dirección http:// o https:// que abrirá.",
+                parse_mode=None,
+                reply_markup=broadcast_cancel_keyboard(),
+            )
+            return
+
+        if step == "broadcast_button_url":
+            button_url = text.strip()
+            if not valid_broadcast_button_url(button_url):
+                await message.reply_text(
+                    sc("Envíame un enlace http:// o https:// válido, sin espacios."),
+                    reply_markup=broadcast_cancel_keyboard(),
+                )
+                return
+            admin_state.update({"step": "broadcast_confirm", "button_url": button_url})
+            context.user_data["admin_state"] = admin_state
+            await message.reply_text(
+                broadcast_preview_text(admin_state),
+                parse_mode=None,
+                reply_markup=broadcast_confirmation_keyboard(),
+            )
+            return
+
+        if step == "broadcast_confirm":
+            await message.reply_text(
+                sc("Revisa la vista previa y pulsa «Enviar a todos» para confirmar."),
+                reply_markup=broadcast_confirmation_keyboard(),
+            )
+            return
+
         if step == "admin_cloud_user":
             context.user_data.pop("admin_state", None)
             try:
@@ -5605,6 +5837,53 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if chat.type != "private":
         await message.reply_text(sc("Usa el chat privado del bot."))
         return
+    admin_state = context.user_data.get("admin_state")
+    if admin_state and is_owner(user.id):
+        step = admin_state.get("step")
+        if step == "broadcast_media":
+            if getattr(message, "photo", None):
+                media = message.photo[-1]
+                media_type = "photo"
+                media_file_id = media.file_id
+                media_name = "foto"
+                media_size = getattr(media, "file_size", None)
+            elif getattr(message, "document", None):
+                media = message.document
+                media_type = "document"
+                media_file_id = media.file_id
+                media_name = getattr(media, "file_name", None) or "documento"
+                media_size = getattr(media, "file_size", None)
+            else:
+                await message.reply_text(
+                    sc("Para el adjunto opcional, envía una foto o un documento/APK."),
+                    reply_markup=broadcast_media_keyboard(),
+                )
+                return
+            if media_size and media_size > BOT_API_SEND_LIMIT:
+                await message.reply_text(
+                    sc("El adjunto supera el límite de envío del bot (50 MiB). Envía otro archivo o pulsa Sin foto ni archivo."),
+                    reply_markup=broadcast_media_keyboard(),
+                )
+                return
+            admin_state.update({
+                "step": "broadcast_button_choice",
+                "media_type": media_type,
+                "media_file_id": media_file_id,
+                "media_name": media_name,
+            })
+            context.user_data["admin_state"] = admin_state
+            await message.reply_text(
+                f"✅ Adjunto guardado ({'foto' if media_type == 'photo' else 'archivo'}: {media_name}).\n¿Quieres añadir un botón con enlace?",
+                parse_mode=None,
+                reply_markup=broadcast_button_choice_keyboard(),
+            )
+            return
+        if isinstance(step, str) and step.startswith("broadcast_"):
+            await message.reply_text(
+                sc("Primero completa el paso actual de la difusión con sus botones."),
+                reply_markup=broadcast_cancel_keyboard(),
+            )
+            return
     allowed: set[int] = context.application.bot_data["allowed_users"]
     if allowed and user.id not in allowed and not is_owner(user.id):
         await message.reply_text(sc("Bot limitado a usuarios autorizados."))
