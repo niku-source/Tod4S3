@@ -11,6 +11,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock, Thread
 from urllib.parse import parse_qs, unquote, urlsplit
+from sync_api import consume_pairing_code, deliveries_for_token, revoke_token
 
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 SITE_STARTED_AT = time.time()
@@ -44,6 +45,15 @@ class StoreHandler(SimpleHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         parsed = urlsplit(unquote(self.path))
         path = parsed.path
+        if path == "/api/app/deliveries":
+            token = self.headers.get("Authorization", "")
+            token = token[7:].strip() if token.lower().startswith("bearer ") else ""
+            deliveries = deliveries_for_token(token)
+            if deliveries is None:
+                self._json_response({"ok": False, "error": "unauthorized"}, 401)
+            else:
+                self._json_response({"ok": True, "deliveries": deliveries})
+            return
         if path == "/api/site-stats":
             visitor = parse_qs(parsed.query).get("visitor", [""])[0][:96]
             if not _VISITOR_RE.fullmatch(visitor):
@@ -98,6 +108,52 @@ class StoreHandler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
         super().do_GET()
+
+    def do_POST(self):  # noqa: N802
+        parsed = urlsplit(unquote(self.path))
+        if parsed.path not in {"/api/app/pair", "/api/app/revoke"}:
+            self._json_response({"ok": False, "error": "not_found"}, 404)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length < 0 or length > 8192:
+                raise ValueError("body_too_large")
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict):
+                raise ValueError("invalid_body")
+        except (ValueError, TypeError, json.JSONDecodeError):
+            self._json_response({"ok": False, "error": "invalid_body"}, 400)
+            return
+        if parsed.path == "/api/app/pair":
+            token = consume_pairing_code(body.get("code", ""), body.get("device_id", ""))
+            if not token:
+                self._json_response({"ok": False, "error": "invalid_or_expired_code"}, 401)
+            else:
+                self._json_response({"ok": True, "token": token})
+            return
+        token = self.headers.get("Authorization", "")
+        token = token[7:].strip() if token.lower().startswith("bearer ") else ""
+        if not revoke_token(token):
+            self._json_response({"ok": False, "error": "unauthorized"}, 401)
+        else:
+            self._json_response({"ok": True})
+
+    def do_OPTIONS(self):  # noqa: N802
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.end_headers()
+
+    def _json_response(self, payload: dict, status: int = 200):
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_HEAD(self):  # noqa: N802
         self.do_GET()

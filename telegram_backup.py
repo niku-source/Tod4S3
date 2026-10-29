@@ -39,6 +39,7 @@ STATE_KEYS = (
     "todus_users.json",
     "todus_auth.json",
     "todus_sent_messages.json",
+    "sync_app.json",
 )
 OLD_BACKUP_DIR_NAMES = {"backup", "backups", "old_backup", "old_backups", "archive", "archives"}
 

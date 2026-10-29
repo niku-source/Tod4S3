@@ -53,6 +53,7 @@ from telegram_backup import (
     restore_from_telegram,
 )
 from task_queue import FairTaskQueue, TransferTask
+from sync_api import create_pairing_code, record_delivery
 
 load_dotenv()
 
@@ -351,6 +352,7 @@ ADMIN_AUDIT_FILE = os.getenv("ADMIN_AUDIT_FILE", str(DATA_DIR / "admin_audit.jso
 TODUS_USERS_FILE = os.getenv("TODUS_USERS_FILE", str(DATA_DIR / "todus_users.json"))
 TODUS_AUTH_FILE = os.getenv("TODUS_AUTH_FILE", str(DATA_DIR / "todus_auth.json"))
 TODUS_SENT_MESSAGES_FILE = os.getenv("TODUS_SENT_MESSAGES_FILE", str(DATA_DIR / "todus_sent_messages.json"))
+SYNC_APP_STATE_FILE = os.getenv("SYNC_APP_STATE_FILE", str(DATA_DIR / "sync_app.json"))
 # Telegram Bot API no mantiene una sesión local. La sesión MTProto opcional del proyecto
 # sí puede persistirse aquí para incluirla, cifrada, en la copia de seguridad.
 TELEGRAM_AUTH_DIR = DATA_DIR / "telegram_auth"
@@ -369,6 +371,7 @@ def telegram_backup_layout() -> BackupLayout:
             "todus_users.json": TODUS_USERS_FILE,
             "todus_auth.json": TODUS_AUTH_FILE,
             "todus_sent_messages.json": TODUS_SENT_MESSAGES_FILE,
+            "sync_app.json": SYNC_APP_STATE_FILE,
         },
     )
 
@@ -3324,6 +3327,18 @@ async def process_task(job: TransferTask, application: Application) -> None:
         except Exception as e:
             log.error(f"Error guardando historial: {e}")
 
+        if DELIVERY_MODE == "todus" and not force_chat_delivery:
+            try:
+                record_delivery(
+                    job.user_id,
+                    job.task_id,
+                    filename,
+                    size,
+                    [job.part_urls[i] for i in sorted(job.part_urls) if job.part_urls[i]],
+                )
+            except Exception as e:
+                log.warning("No se pudo publicar la entrega para Tod4S3 Sync: %s", type(e).__name__)
+
         schedule_data_backup(application, "subida completada")
         job.set_state("done")
         links = sorted((i, u) for i, u in job.part_urls.items() if u)
@@ -3881,6 +3896,28 @@ async def todus_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "",
         "Tus próximas descargas llegarán",
         "a ese chat de ToDus.",
+    ]))
+
+
+async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Entrega un código de un solo uso para vincular Tod4S3 Sync."""
+    if not is_private_update(update):
+        return
+    user = update.effective_user
+    message = update.effective_message
+    if not user or not message:
+        return
+    if not await ensure_membership(update, context):
+        return
+    code = create_pairing_code(user.id)
+    await message.reply_text(card("📲 ᴠɪɴᴄᴜʟᴀʀ ᴛᴏᴅ4s3 ꜱʏɴᴄ", [
+        "Abre la aplicación Tod4S3 Sync",
+        "y escribe este código:",
+        "",
+        f"{{mono:{code}}}",
+        "",
+        "El código dura 10 minutos y solo puede usarse una vez.",
+        "No lo compartas con otra persona.",
     ]))
 
 
@@ -5700,6 +5737,7 @@ async def post_init(application: Application) -> None:
         BotCommand("historial", sc("historial de descargas")),
         BotCommand("micuota", sc("ver mi plan y cuota")),
         BotCommand("id", sc("ver mi id numérico")),
+        BotCommand("app", sc("vincular Tod4S3 Sync")),
         BotCommand("backup", sc("probar respaldo")),
     ])
     log.info("Comandos del bot registrados correctamente")
@@ -5858,6 +5896,7 @@ def main() -> None:
     application.add_handler(CommandHandler("micuota", my_quota_command))
     application.add_handler(CommandHandler("id", id_command))
     application.add_handler(CommandHandler("todus", todus_command))
+    application.add_handler(CommandHandler("app", app_command))
     application.add_handler(CommandHandler("top", top_command))
     application.add_handler(CommandHandler("backup", backup_command))
     application.add_handler(CommandHandler("jkadmin", jkadmin_command))
