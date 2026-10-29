@@ -53,9 +53,10 @@ from telegram_backup import (
     restore_from_telegram,
 )
 from task_queue import FairTaskQueue, TransferTask
-from sync_api import create_pairing_code, record_delivery
 
 load_dotenv()
+
+from sync_api import create_pairing_code, record_delivery
 
 TELEGRAM_BOT_TOKEN = ""
 OWNER_TELEGRAM_ID = ""
