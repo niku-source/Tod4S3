@@ -350,6 +350,7 @@ USERS_DATA_FILE = os.getenv("USERS_DATA_FILE", str(DATA_DIR / "users.json"))
 ADMIN_AUDIT_FILE = os.getenv("ADMIN_AUDIT_FILE", str(DATA_DIR / "admin_audit.json"))
 TODUS_USERS_FILE = os.getenv("TODUS_USERS_FILE", str(DATA_DIR / "todus_users.json"))
 TODUS_AUTH_FILE = os.getenv("TODUS_AUTH_FILE", str(DATA_DIR / "todus_auth.json"))
+TODUS_SENT_MESSAGES_FILE = os.getenv("TODUS_SENT_MESSAGES_FILE", str(DATA_DIR / "todus_sent_messages.json"))
 # Telegram Bot API no mantiene una sesión local. La sesión MTProto opcional del proyecto
 # sí puede persistirse aquí para incluirla, cifrada, en la copia de seguridad.
 TELEGRAM_AUTH_DIR = DATA_DIR / "telegram_auth"
@@ -367,6 +368,7 @@ def telegram_backup_layout() -> BackupLayout:
             "admin_audit.json": ADMIN_AUDIT_FILE,
             "todus_users.json": TODUS_USERS_FILE,
             "todus_auth.json": TODUS_AUTH_FILE,
+            "todus_sent_messages.json": TODUS_SENT_MESSAGES_FILE,
         },
     )
 
@@ -1271,6 +1273,24 @@ async def cloud_expiration_monitor(application: Application) -> None:
             log.warning("Monitor de expiración de nube: %s", type(exc).__name__)
         # Limita a aproximadamente un minuto el retraso al borrar enlaces vencidos.
         await asyncio.sleep(60)
+
+
+async def todus_message_cleanup_monitor(application: Application) -> None:
+    """Limpia cada hora solo mensajes ToDus enviados y registrados por el bot."""
+    while True:
+        try:
+            await asyncio.sleep(60 * 60)
+            if DELIVERY_MODE != "todus":
+                continue
+            total, deleted, failed = await asyncio.to_thread(cleanup_todus_sent_messages)
+            if total:
+                log.info("Limpieza automática ToDus: registrados=%d eliminados=%d fallos=%d", total, deleted, failed)
+                if deleted:
+                    schedule_data_backup(application, "limpieza automática de mensajes ToDus")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("Monitor de limpieza ToDus: %s", type(exc).__name__)
 
 
 def clear_all_task_history() -> int:
@@ -2347,6 +2367,7 @@ def admin_section_keyboard(section: str) -> InlineKeyboardMarkup:
         ],
         "storage": [
             [btn("🗂️ ʜɪꜱᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:user_history")],
+            [btn("🧹 ʟɪᴍᴘɪᴀʀ ᴍᴇɴꜱᴀᴊᴇꜱ ᴛᴏᴅᴜꜱ", callback_data="admin:todus_cleanup_confirm")],
             [btn("☁️ ʙᴏʀʀᴀʀ ᴛᴏᴅᴏꜱ ʟᴏꜱ ᴀʀᴄʜɪᴠᴏꜱ", callback_data="admin:cloud_all_confirm")],
             [btn("🗑️ ʙᴏʀʀᴀʀ ᴀʀᴄʜɪᴠᴏ ᴅᴇ ᴜꜱᴜᴀʀɪᴏ", callback_data="admin:cloud_user")],
             [btn("🧹 ʙᴏʀʀᴀʀ ᴛᴏᴅᴏ ᴇʟ ʜɪꜱᴛᴏʀɪᴀʟ", callback_data="admin:all_history_confirm")],
@@ -2650,6 +2671,7 @@ TODUS_BOT_PHONE = os.getenv("TODUS_PHONE", "").strip()
 TODUS_BOT_PASSWORD = os.getenv("TODUS_PASSWORD", "").strip()
 _todus_client = None
 _todus_client_lock = threading.Lock()
+_todus_cleanup_lock = threading.Lock()
 
 
 def _normalize_todus_number(value: str) -> str:
@@ -2705,6 +2727,63 @@ def set_user_todus_number(user_id: int, number: str) -> None:
         _save_json(USERS_DATA_FILE, users_data)
     except Exception:
         log.error("Error guardando número ToDus de %s", user_id, exc_info=True)
+
+
+def record_todus_sent_message(target_number: str, message_id: str) -> None:
+    """Registra el ID del mensaje que acaba de crear la cuenta del bot."""
+    target = _normalize_todus_number(target_number) or str(target_number).strip()
+    message_id = str(message_id or "").strip()
+    if not target or not message_id:
+        return
+    try:
+        data = _load_json(TODUS_SENT_MESSAGES_FILE)
+        entries = data.get("messages", []) if isinstance(data, dict) else []
+        if not isinstance(entries, list):
+            entries = []
+        exists = any(
+            isinstance(item, dict)
+            and str(item.get("target")) == target
+            and str(item.get("message_id")) == message_id
+            for item in entries
+        )
+        if not exists:
+            entries.append({
+                "target": target,
+                "message_id": message_id,
+                "sent_at": datetime.now(timezone.utc).isoformat(),
+            })
+        _save_json(TODUS_SENT_MESSAGES_FILE, {"messages": entries[-10000:]})
+    except Exception:
+        log.warning("No se pudo registrar un mensaje ToDus para limpieza.", exc_info=True)
+
+
+def cleanup_todus_sent_messages() -> tuple[int, int, int]:
+    """Borra solo mensajes registrados como enviados por esta cuenta del bot."""
+    with _todus_cleanup_lock:
+        data = _load_json(TODUS_SENT_MESSAGES_FILE)
+        entries = data.get("messages", []) if isinstance(data, dict) else []
+        if not isinstance(entries, list) or not entries:
+            return 0, 0, 0
+        client = get_todus_client()
+        remaining = []
+        deleted = 0
+        failed = 0
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            target = str(item.get("target", "")).strip()
+            message_id = str(item.get("message_id", "")).strip()
+            if not target or not message_id:
+                continue
+            try:
+                client.delete_message(target, message_id)
+                deleted += 1
+            except Exception as exc:
+                failed += 1
+                remaining.append(item)
+                log.warning("No se pudo borrar el mensaje ToDus %s (%s).", message_id, type(exc).__name__)
+        _save_json(TODUS_SENT_MESSAGES_FILE, {"messages": remaining})
+        return len(entries), deleted, failed
 
 
 def get_todus_bot_phone() -> str:
@@ -2821,10 +2900,11 @@ def deliver_part_via_todus(part_path: Path, part_name: str, part_size: int,
                     timeout=3600,
                 )
                 response.raise_for_status()
-            client.send_file_message(
+            message_id = client.send_file_message(
                 target_number, download_url, file_type,
                 caption=part_name, file_name=part_name, file_size=part_size,
             )
+            record_todus_sent_message(target_number, message_id)
             return download_url
         except Exception as exc:
             last_error = exc
@@ -4263,6 +4343,51 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             return
 
+        if query.data == "admin:todus_cleanup_confirm":
+            data = _load_json(TODUS_SENT_MESSAGES_FILE)
+            entries = data.get("messages", []) if isinstance(data, dict) else []
+            total = len(entries) if isinstance(entries, list) else 0
+            await edit_query_message_text(query.message,
+                card("⚠️ ʟɪᴍᴘɪᴀʀ ᴛᴏᴅᴜꜱ", [
+                    f"Mensajes registrados: {total}",
+                    "Solo se eliminarán archivos y mensajes",
+                    "enviados por la cuenta del bot.",
+                    "No se borrarán mensajes recibidos ni chats.",
+                    "",
+                    "La limpieza automática se ejecuta cada hora.",
+                ]),
+                reply_markup=InlineKeyboardMarkup([
+                    [btn("✅ ʙᴏʀʀᴀʀ ᴀʜᴏʀᴀ", callback_data="admin:todus_cleanup_yes")],
+                    [btn("❌ ᴄᴀɴᴄᴇʟᴀʀ", callback_data="admin:back")],
+                ]),
+            )
+            return
+
+        if query.data == "admin:todus_cleanup_yes":
+            if DELIVERY_MODE != "todus":
+                await edit_query_message_text(
+                    query.message,
+                    card("⚠️ ᴛᴏᴅᴜꜱ ɴᴏ ᴇꜱᴛá ᴀᴄᴛɪᴠᴏ", [
+                        "La entrega actual no usa ToDus.",
+                        "No se ejecutó ninguna limpieza.",
+                    ]),
+                    reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
+                )
+                return
+            total, deleted, failed = await asyncio.to_thread(cleanup_todus_sent_messages)
+            if deleted:
+                schedule_data_backup(context.application, "limpieza manual de mensajes ToDus")
+            await edit_query_message_text(query.message,
+                card("✅ ʟɪᴍᴘɪᴇᴢᴀ ᴛᴏᴅᴜꜱ", [
+                    f"Registrados: {total}",
+                    f"Eliminados: {deleted}",
+                    f"Fallos: {failed}",
+                    "Los fallos se conservaron para reintentar." if failed else "",
+                ]),
+                reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
+            )
+            return
+
         if query.data == "admin:cloud_all_confirm":
             total = sum(
                 len(entry.get("urls", []))
@@ -5558,6 +5683,10 @@ async def post_init(application: Application) -> None:
     application.bot_data["bot_username"] = identity.username or os.getenv("BOT_USERNAME", "jk_down_bot")
     await asyncio.to_thread(expire_cloud_files)
     application.bot_data["cloud_expiration_task"] = asyncio.create_task(cloud_expiration_monitor(application))
+    if DELIVERY_MODE == "todus":
+        application.bot_data["todus_message_cleanup_task"] = asyncio.create_task(
+            todus_message_cleanup_monitor(application)
+        )
     log.info("Bot activo: @%s", identity.username or "sin_username")
     log.info(f"📂 Directorio de datos: {DATA_DIR}")
     log.info(f"📄 Planes: {PLAN_DATA_FILE}")
@@ -5655,6 +5784,10 @@ async def post_shutdown(application: Application) -> None:
     if expiration_task:
         expiration_task.cancel()
         await asyncio.gather(expiration_task, return_exceptions=True)
+    todus_cleanup_task = application.bot_data.get("todus_message_cleanup_task")
+    if todus_cleanup_task:
+        todus_cleanup_task.cancel()
+        await asyncio.gather(todus_cleanup_task, return_exceptions=True)
     backup_task = application.bot_data.get("telegram_backup_task")
     if backup_task:
         backup_task.cancel()
