@@ -49,8 +49,10 @@ def test_broadcast_sends_optional_button_photo_and_document(monkeypatch):
         media_file_id="telegram-photo-file-id",
     ))
     assert result == (1, 1, 0)
-    assert [kind for kind, _ in calls] == ["message", "photo"]
-    assert calls[1][1]["photo"] == "telegram-photo-file-id"
+    assert [kind for kind, _ in calls] == ["photo"]
+    assert calls[0][1]["photo"] == "telegram-photo-file-id"
+    assert "Anuncio con foto" in calls[0][1]["caption"]
+    assert calls[0][1]["parse_mode"] is None
     calls.clear()
 
     result = asyncio.run(bot.broadcast_admin_message(
@@ -60,5 +62,20 @@ def test_broadcast_sends_optional_button_photo_and_document(monkeypatch):
         media_file_id="telegram-apk-file-id",
     ))
     assert result == (1, 1, 0)
-    assert [kind for kind, _ in calls] == ["message", "document"]
-    assert calls[1][1]["document"] == "telegram-apk-file-id"
+    assert [kind for kind, _ in calls] == ["document"]
+    assert calls[0][1]["document"] == "telegram-apk-file-id"
+    assert "Anuncio con APK" in calls[0][1]["caption"]
+    assert calls[0][1]["parse_mode"] is None
+    calls.clear()
+
+    long_body = "x" * 1100
+    result = asyncio.run(bot.broadcast_admin_message(
+        telegram_bot,
+        long_body,
+        media_type="photo",
+        media_file_id="telegram-photo-file-id",
+    ))
+    assert result == (1, 1, 0)
+    assert [kind for kind, _ in calls] == ["message", "photo"]
+    assert long_body in calls[0][1]["text"]
+    assert calls[1][1]["photo"] == "telegram-photo-file-id"

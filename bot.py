@@ -993,19 +993,38 @@ async def broadcast_admin_message(
     keyboard = None
     if button_label and button_url:
         keyboard = InlineKeyboardMarkup([[btn(button_label, url=button_url)]])
+    message_text = f"📢 Mensaje del administrador\n\n{body}"
+    caption_fits = len(message_text.encode("utf-16-le")) // 2 <= 900
     for target_id in targets:
         try:
-            await bot_obj.send_message(
-                chat_id=target_id,
-                text=f"📢 Mensaje del administrador\n\n{body}",
-                parse_mode=None,
-                reply_markup=keyboard,
-                disable_web_page_preview=True,
-            )
-            if media_file_id and media_type == "photo":
-                await bot_obj.send_photo(chat_id=target_id, photo=media_file_id)
-            elif media_file_id and media_type == "document":
-                await bot_obj.send_document(chat_id=target_id, document=media_file_id)
+            if media_file_id and media_type == "photo" and caption_fits:
+                await bot_obj.send_photo(
+                    chat_id=target_id,
+                    photo=media_file_id,
+                    caption=message_text,
+                    parse_mode=None,
+                    reply_markup=keyboard,
+                )
+            elif media_file_id and media_type == "document" and caption_fits:
+                await bot_obj.send_document(
+                    chat_id=target_id,
+                    document=media_file_id,
+                    caption=message_text,
+                    parse_mode=None,
+                    reply_markup=keyboard,
+                )
+            else:
+                await bot_obj.send_message(
+                    chat_id=target_id,
+                    text=message_text,
+                    parse_mode=None,
+                    reply_markup=keyboard,
+                    disable_web_page_preview=True,
+                )
+                if media_file_id and media_type == "photo":
+                    await bot_obj.send_photo(chat_id=target_id, photo=media_file_id)
+                elif media_file_id and media_type == "document":
+                    await bot_obj.send_document(chat_id=target_id, document=media_file_id)
             sent += 1
         except Exception as exc:
             failed += 1
