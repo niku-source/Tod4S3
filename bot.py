@@ -3183,6 +3183,7 @@ async def enqueue_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE, *
             ]),
         )
         return
+    ensure_task_workers(context.application)
     await _edit_task_status(job, card("⏳ ᴇɴ ᴄᴏʟᴀ", ["Esperando turno..."]))
 
 
@@ -3546,8 +3547,50 @@ async def process_task(job: TransferTask, application: Application) -> None:
 async def task_worker(application: Application) -> None:
     manager: FairTaskQueue = application.bot_data["task_queue"]
     while True:
-        job = await manager.take()
-        await process_task(job, application)
+        try:
+            job = await manager.take()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Task worker falló al reclamar una tarea; reintentará en 1 s")
+            await asyncio.sleep(1)
+            continue
+        try:
+            await process_task(job, application)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.exception("Excepción no controlada en worker user=%s task=%s", job.user_id, job.task_id)
+            if job.cancel_requested:
+                job.set_state("paused")
+            else:
+                job.error = f"Fallo interno inesperado ({type(exc).__name__}). Puedes reintentar."
+                job.set_state("error")
+            try:
+                await _edit_task_status(job, task_detail_text(job))
+            except Exception:
+                log.exception("No se pudo publicar el error de task=%s", job.task_id)
+
+
+def ensure_task_workers(application: Application) -> int:
+    """Repone workers que hayan terminado y devuelve cuántos están vivos."""
+    expected = max(1, int(application.bot_data.get("task_worker_count", 1)))
+    current = application.bot_data.get("task_workers", [])
+    current = current if isinstance(current, list) else []
+    alive = [worker for worker in current if not worker.done()]
+    missing = max(0, expected - len(alive))
+    if missing:
+        if current:
+            log.warning("Faltan workers de cola: vivos=%d esperados=%d; reponiendo=%d",
+                        len(alive), expected, missing)
+        for _ in range(missing):
+            number = len(alive) + 1
+            alive.append(asyncio.create_task(
+                task_worker(application), name=f"transfer-worker-{number}"
+            ))
+        application.bot_data["task_workers"] = alive
+        log.info("Workers de transferencia activos: %d/%d", len(alive), expected)
+    return len(alive)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -3562,11 +3605,18 @@ async def queue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await ensure_membership(update, context):
         return
     manager: FairTaskQueue = context.application.bot_data["task_queue"]
+    active_workers = ensure_task_workers(context.application)
+    expected_workers = max(1, int(context.application.bot_data.get("task_worker_count", 1)))
     states = {"queued", "downloading", "uploading", "cancelling", "paused"}
     jobs = manager.for_user(user.id, states)[:5]
     if not jobs:
         await message.reply_text(
-            card("📋 ᴄᴏʟᴀ", ["No tienes tareas activas.", "", "Envía un archivo", "o enlace directo."]),
+            card("📋 ᴄᴏʟᴀ", [
+                "No tienes tareas activas.",
+                f"Procesadores: {active_workers}/{expected_workers} activos.",
+                "",
+                "Envía un archivo o enlace directo.",
+            ]),
             reply_markup=home_keyboard(),
         )
         return
@@ -3574,7 +3624,11 @@ async def queue_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                       callback_data=f"j:{j.task_id}:open")] for j in jobs]
     keyboard.append([btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")])
     await message.reply_text(
-        card("📋 ᴄᴏʟᴀ", [task_summary(j) for j in jobs]),
+        card("📋 ᴄᴏʟᴀ", [
+            f"Procesadores: {active_workers}/{expected_workers} activos.",
+            "",
+            *[task_summary(j) for j in jobs],
+        ]),
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
@@ -6066,10 +6120,7 @@ async def post_init(application: Application) -> None:
         except Exception as exc:
             log.warning("No se pudo confirmar el respaldo después de conectar (%s).", type(exc).__name__)
     if application.bot_data.get("task_queue"):
-        workers = application.bot_data.get("task_worker_count", 1)
-        application.bot_data["task_workers"] = [
-            asyncio.create_task(task_worker(application)) for _ in range(workers)
-        ]
+        ensure_task_workers(application)
     api_id_raw = os.getenv("TELEGRAM_API_ID", "").strip()
     api_hash = os.getenv("TELEGRAM_API_HASH", "").strip()
     application.bot_data["mtproto_client"] = None
@@ -6129,6 +6180,27 @@ async def post_init(application: Application) -> None:
         log.error("MTProto no activado (%s)", type(exc).__name__)
 
 
+async def mark_unfinished_tasks_interrupted(application: Application) -> int:
+    manager = application.bot_data.get("task_queue")
+    jobs = getattr(manager, "jobs", {}) if manager else {}
+    interrupted = 0
+    active_states = {"queued", "downloading", "uploading", "cancelling"}
+    for job in list(jobs.values()) if isinstance(jobs, dict) else []:
+        if job.state not in active_states:
+            continue
+        job.error = "El bot se reinició antes de completar esta tarea. Vuelve a enviar el enlace o archivo."
+        job.set_state("error")
+        interrupted += 1
+        try:
+            await job.status_message.edit_text(
+                task_detail_text(job),
+                reply_markup=InlineKeyboardMarkup([]),
+            )
+        except Exception:
+            log.warning("No se pudo marcar como interrumpida la tarea %s", job.task_id)
+    return interrupted
+
+
 async def post_shutdown(application: Application) -> None:
     expiration_task = application.bot_data.get("cloud_expiration_task")
     if expiration_task:
@@ -6150,6 +6222,9 @@ async def post_shutdown(application: Application) -> None:
         worker.cancel()
     if workers:
         await asyncio.gather(*workers, return_exceptions=True)
+    interrupted_jobs = await mark_unfinished_tasks_interrupted(application)
+    if interrupted_jobs:
+        log.warning("Cierre: %d tareas de cola interrumpidas; el usuario deberá reenviarlas.", interrupted_jobs)
     mtproto_client = application.bot_data.get("mtproto_client")
     if mtproto_client is not None and mtproto_client.is_connected():
         await mtproto_client.disconnect()
