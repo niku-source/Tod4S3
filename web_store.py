@@ -10,8 +10,12 @@ from html import escape
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock, Thread
+from typing import Callable
 from urllib.parse import parse_qs, unquote, urlsplit
+import sync_api
+import todus_s3_storage
 from sync_api import consume_pairing_code, deliveries_for_token, revoke_token
+from todus_s3_storage import delete_from_todus_s3
 
 WEB_ROOT = Path(__file__).resolve().parent / "web"
 SITE_STARTED_AT = time.time()
@@ -21,6 +25,76 @@ _TOTAL_VISITS = 0
 _MAX_VISITORS = 5000
 _VISITOR_RE = re.compile(r"^[A-Za-z0-9-]{8,96}$")
 _DEFAULT_ORIGIN = "https://tod4s3-production.up.railway.app"
+_PROFILE_CHECKER: Callable[[int], dict] | None = None
+
+
+def _validated_delivery_url(url: str, user_id: int) -> bool:
+    """Check that a saved part belongs to this user's configured ToDus namespace."""
+    if not isinstance(url, str) or not url:
+        return False
+    try:
+        parsed = urlsplit(url)
+        base = urlsplit(todus_s3_storage.TODUS_S3_BASE_URL)
+        if (parsed.scheme != "https" or base.scheme != "https"
+                or not parsed.hostname or not base.hostname
+                or parsed.hostname.lower() != base.hostname.lower()
+                or parsed.port != base.port
+                or parsed.username is not None or parsed.password is not None
+                or parsed.query or parsed.fragment):
+            return False
+    except ValueError:
+        return False
+    base_path = base.path.rstrip("/")
+    expected_prefix = f"{base_path}/users/tg_{int(user_id)}/telegram/"
+    if not parsed.path.startswith(expected_prefix):
+        return False
+    remainder = parsed.path[len(expected_prefix):]
+    if not remainder:
+        return False
+    # Prevent encoded separators and traversal segments from changing the key
+    # interpreted by the storage service after URL decoding.
+    for segment in remainder.split("/"):
+        decoded = unquote(segment)
+        if decoded in {"", ".", ".."} or "/" in decoded or "\\" in decoded:
+            return False
+    return True
+
+
+def delete_delivery_for_token(token: str, task_id: str) -> tuple[dict, int]:
+    """Delete an owned delivery; network calls occur outside sync_api's lock."""
+    user_id = sync_api.user_id_for_token(token)
+    if user_id is None:
+        return {"ok": False, "error": "unauthorized"}, 401
+    if not isinstance(task_id, str) or not task_id.strip() or len(task_id) > 200:
+        return {"ok": False, "error": "invalid_task_id"}, 400
+    task_id = task_id.strip()
+    row = sync_api.delivery_for_user(user_id, task_id)
+    if row is None:
+        if sync_api.has_delivery_without_task_id(user_id):
+            return {"ok": False, "error": "legacy_delivery_incomplete",
+                    "message": "Hay una entrega antigua sin task_id; no se intentó borrar ninguna parte."}, 409
+        return {"ok": False, "error": "delivery_not_found"}, 404
+    if row.get("source", "tod4s3_bot") != "tod4s3_bot":
+        return {"ok": False, "error": "delivery_source_not_supported",
+                "message": "Esta entrega no fue creada por el bot y no se puede borrar desde aquí."}, 409
+    parts = row.get("parts")
+    if row.get("task_id") != task_id or not isinstance(parts, list) or not parts:
+        return {"ok": False, "error": "legacy_delivery_incomplete",
+                "message": "La entrega no contiene un task_id o partes válidas; no se intentó borrar."}, 409
+    if any(not _validated_delivery_url(url, user_id) for url in parts):
+        return {"ok": False, "error": "invalid_delivery_url",
+                "message": "La entrega contiene una URL que no pertenece al espacio ToDus de este usuario."}, 409
+    try:
+        for url in parts:
+            delete_from_todus_s3(url)
+    except Exception:
+        # Do not expose storage responses, URLs, credentials, or exception text.
+        return {"ok": False, "error": "delete_failed",
+                "message": "No se pudieron borrar todas las partes; la entrega se conserva para reintentar."}, 502
+    if not sync_api.remove_delivery_for_user(user_id, task_id, row):
+        return {"ok": False, "error": "delivery_changed",
+                "message": "La entrega cambió durante el borrado; la fila se conserva."}, 409
+    return {"ok": True, "task_id": task_id, "deleted_parts": len(parts)}, 200
 
 
 def _safe_site_origin(handler: "StoreHandler") -> str:
@@ -45,6 +119,29 @@ class StoreHandler(SimpleHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         parsed = urlsplit(unquote(self.path))
         path = parsed.path
+        if path == "/api/app/profile":
+            authorization = self.headers.get("Authorization", "")
+            token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+            user_id = sync_api.user_id_for_token(token)
+            if user_id is None:
+                self._json_response({"ok": False, "error": "unauthorized"}, 401)
+                return
+            checker = _PROFILE_CHECKER
+            if checker is None:
+                self._json_response({"ok": False, "error": "profile_unavailable"}, 503)
+                return
+            try:
+                profile = checker(user_id)
+                if (not isinstance(profile, dict)
+                        or not isinstance(profile.get("premium"), bool)
+                        or not isinstance(profile.get("plan"), str)
+                        or not profile["plan"]):
+                    raise ValueError("invalid_profile")
+            except Exception:
+                self._json_response({"ok": False, "error": "profile_unavailable"}, 503)
+                return
+            self._json_response({"premium": profile["premium"], "plan": profile["plan"]})
+            return
         if path == "/api/app/deliveries":
             token = self.headers.get("Authorization", "")
             token = token[7:].strip() if token.lower().startswith("bearer ") else ""
@@ -111,7 +208,7 @@ class StoreHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         parsed = urlsplit(unquote(self.path))
-        if parsed.path not in {"/api/app/pair", "/api/app/revoke"}:
+        if parsed.path not in {"/api/app/pair", "/api/app/revoke", "/api/app/deliveries/delete"}:
             self._json_response({"ok": False, "error": "not_found"}, 404)
             return
         try:
@@ -133,6 +230,10 @@ class StoreHandler(SimpleHTTPRequestHandler):
             return
         token = self.headers.get("Authorization", "")
         token = token[7:].strip() if token.lower().startswith("bearer ") else ""
+        if parsed.path == "/api/app/deliveries/delete":
+            payload, status = delete_delivery_for_token(token, body.get("task_id"))
+            self._json_response(payload, status)
+            return
         if not revoke_token(token):
             self._json_response({"ok": False, "error": "unauthorized"}, 401)
         else:
@@ -175,7 +276,9 @@ class StoreHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
 
-def start_store_server() -> Thread:
+def start_store_server(profile_checker: Callable[[int], dict] | None = None) -> Thread:
+    global _PROFILE_CHECKER
+    _PROFILE_CHECKER = profile_checker
     port = int(os.getenv("PORT", "8080"))
     server = ThreadingHTTPServer(("0.0.0.0", port), StoreHandler)
     thread = Thread(target=server.serve_forever, name="todus-store-http", daemon=True)

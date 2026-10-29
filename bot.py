@@ -2031,6 +2031,7 @@ def btn(text: str, **kwargs) -> InlineKeyboardButton:
 def main_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton("📥 DESCARGAS", callback_data="downloads", style="success")],
+        [InlineKeyboardButton("📱 VINCULAR APLICACIÓN", callback_data="app:pair", style="success")],
         [InlineKeyboardButton(
             f"💰 SALDO: {get_user_balance(user_id) if user_id is not None else 0}$ · REFERIDOS",
             callback_data="balance",
@@ -3900,6 +3901,20 @@ async def todus_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     ]))
 
 
+def app_pairing_message(user_id: int) -> str:
+    """Genera el mensaje de vinculación usado por /app y el botón del menú."""
+    code = create_pairing_code(user_id)
+    return card("📲 ᴠɪɴᴄᴜʟᴀʀ ᴛᴏᴅ4s3 ꜱʏɴᴄ", [
+        "Abre la aplicación Tod4S3 Sync",
+        "y escribe este código:",
+        "",
+        f"{{mono:{code}}}",
+        "",
+        "El código dura 10 minutos y solo puede usarse una vez.",
+        "No lo compartas con otra persona.",
+    ])
+
+
 async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Entrega un código de un solo uso para vincular Tod4S3 Sync."""
     if not is_private_update(update):
@@ -3910,16 +3925,7 @@ async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     if not await ensure_membership(update, context):
         return
-    code = create_pairing_code(user.id)
-    await message.reply_text(card("📲 ᴠɪɴᴄᴜʟᴀʀ ᴛᴏᴅ4s3 ꜱʏɴᴄ", [
-        "Abre la aplicación Tod4S3 Sync",
-        "y escribe este código:",
-        "",
-        f"{{mono:{code}}}",
-        "",
-        "El código dura 10 minutos y solo puede usarse una vez.",
-        "No lo compartas con otra persona.",
-    ]))
+    await message.reply_text(app_pairing_message(user.id))
 
 
 def todus_registration_keyboard() -> InlineKeyboardMarkup:
@@ -4041,6 +4047,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.message.reply_text(blocked_user_text())
         return
     register_user(user)
+    if query.data == "app:pair":
+        await query.answer()
+        if not await ensure_membership(update, context):
+            return
+        if query.message and hasattr(query.message, "reply_text"):
+            await query.message.reply_text(app_pairing_message(user.id))
+        return
     if query.data == "premium:compressor":
         if not (is_owner(user.id) or get_user_plan(user.id) == "premium"):
             await query.answer(sc("Esta herramienta es exclusiva de Premium."), show_alert=True)
@@ -5857,10 +5870,15 @@ async def post_shutdown(application: Application) -> None:
             log.warning("No se completó el respaldo al cerrar (%s).", type(exc).__name__)
 
 
+def sync_app_profile(user_id: int) -> dict:
+    plan = get_user_plan(user_id)
+    return {"premium": is_owner(user_id) or plan == "premium", "plan": plan}
+
+
 def main() -> None:
     try:
         from web_store import start_store_server
-        start_store_server()
+        start_store_server(profile_checker=sync_app_profile)
     except Exception:
         log.exception("No se pudo iniciar la tienda web de Railway")
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN.strip()

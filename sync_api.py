@@ -128,6 +128,7 @@ def record_delivery(user_id: int, task_id: str, filename: str, size: int,
             deliveries = []
         deliveries.insert(0, {
             "task_id": str(task_id),
+            "source": "tod4s3_bot",
             "filename": str(filename or "archivo")[:180],
             "size": max(0, int(size or 0)),
             "parts": [str(url) for url in parts if str(url).startswith("https://")],
@@ -144,4 +145,56 @@ def deliveries_for_token(token: str) -> list[dict[str, Any]] | None:
     with _LOCK:
         state = _read()
         rows = state["deliveries"].get(str(user_id), [])
-        return rows if isinstance(rows, list) else []
+        if not isinstance(rows, list):
+            return []
+        return [
+            ({**row, "source": "tod4s3_bot"} if "source" not in row else row)
+            for row in rows
+            if isinstance(row, dict) and row.get("source", "tod4s3_bot") == "tod4s3_bot"
+        ]
+
+
+def delivery_for_user(user_id: int, task_id: str) -> dict[str, Any] | None:
+    """Devuelve una copia de una entrega cuyo propietario ya se verificó."""
+    with _LOCK:
+        state = _read()
+        rows = state["deliveries"].get(str(int(user_id)), [])
+        if not isinstance(rows, list):
+            return None
+        for row in rows:
+            if isinstance(row, dict) and row.get("task_id") == task_id:
+                return dict(row)
+    return None
+
+
+def has_delivery_without_task_id(user_id: int) -> bool:
+    """Indica si hay entregas legacy que no pueden identificarse para borrado."""
+    with _LOCK:
+        state = _read()
+        rows = state["deliveries"].get(str(int(user_id)), [])
+        return isinstance(rows, list) and any(
+            isinstance(row, dict)
+            and row.get("source", "tod4s3_bot") == "tod4s3_bot"
+            and (not isinstance(row.get("task_id"), str) or not row.get("task_id").strip())
+            for row in rows
+        )
+
+
+def remove_delivery_for_user(user_id: int, task_id: str,
+                             expected_row: dict[str, Any]) -> bool:
+    """Elimina localmente la fila solo si no cambió durante el borrado remoto."""
+    with _LOCK:
+        state = _read()
+        key = str(int(user_id))
+        rows = state["deliveries"].get(key, [])
+        if not isinstance(rows, list):
+            return False
+        for index, row in enumerate(rows):
+            if isinstance(row, dict) and row.get("task_id") == task_id:
+                if row != expected_row:
+                    return False
+                del rows[index]
+                state["deliveries"][key] = rows
+                _write(state)
+                return True
+    return False
