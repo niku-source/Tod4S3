@@ -96,6 +96,7 @@ class PlatformDownloadTests(unittest.TestCase):
         self.assertEqual(size, 5)
         self.assertTrue(captured["noplaylist"])
         self.assertIn("ext=mp4", captured["format"])
+        self.assertEqual(captured["concurrent_fragment_downloads"], 4)
         self.assertEqual(captured["max_filesize"], 1024)
         self.assertNotIn("http_headers", captured)
         self.assertNotIn("cookiefile", captured)

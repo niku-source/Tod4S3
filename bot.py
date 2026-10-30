@@ -3232,8 +3232,20 @@ async def process_task(job: TransferTask, application: Application) -> None:
                     platform_dir = Path(tempfile.mkdtemp(prefix="tg-platform-"))
                     loop = asyncio.get_running_loop()
                     seconds = env_int("MAX_TRANSFER_HOURS", 24) * 3600
+                    progress_gate_lock = threading.Lock()
+                    progress_gate = {"last": 0.0, "bucket": -1}
 
                     def platform_progress(received, total):
+                        now = time.monotonic()
+                        percent = min(100, int(received * 100 / total)) if total else 0
+                        bucket = percent // 5
+                        with progress_gate_lock:
+                            if now - progress_gate["last"] < 1.5:
+                                return
+                            if total and percent < 100 and bucket <= progress_gate["bucket"]:
+                                return
+                            progress_gate["last"] = now
+                            progress_gate["bucket"] = bucket
                         future = asyncio.run_coroutine_threadsafe(
                             report_download_progress(received, total), loop
                         )

@@ -121,7 +121,7 @@ def _cnv_youtube_download(
         if max_bytes and total > max_bytes:
             raise ValueError(f"El vídeo supera el límite de {max_bytes} bytes.")
         with target.open("wb") as handle:
-            for chunk in response.iter_content(chunk_size=1 << 16):
+            for chunk in response.iter_content(chunk_size=1 << 20):
                 if is_cancelled and is_cancelled():
                     raise ValueError("Descarga cancelada.")
                 if max_duration_seconds > 0 and time.monotonic() - started_at > max_duration_seconds:
@@ -279,6 +279,7 @@ def download_platform_video(
         "socket_timeout": 30,
         "retries": 3,
         "fragment_retries": 3,
+        "concurrent_fragment_downloads": 4,
         "extractor_retries": 2,
         "progress_hooks": [check_progress],
         "quiet": True,

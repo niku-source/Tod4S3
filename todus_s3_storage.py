@@ -13,7 +13,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 TODUS_S3_BASE_URL = "https://s3.todus.cu/stream"
-CHUNK_SIZE = 64 * 1024
+CHUNK_SIZE = 1 << 20
 MAX_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 2
 mimetypes.add_type("application/vnd.android.package-archive", ".apk")
