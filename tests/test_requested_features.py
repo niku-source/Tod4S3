@@ -14,6 +14,7 @@ from bot import (
     btn,
     button_callback,
     admin_keyboard,
+    admin_section_keyboard,
     blocked_user_text,
     channel_download_keyboard,
     download_keyboard,
@@ -67,7 +68,9 @@ class RequestedFeatureTests(unittest.TestCase):
         self.assertIn("500 ᴍʙ — 5$", plans_text(123, "jk_bot"))
         self.assertIn("20 ɢʙ — 200$", plans_text(123, "jk_bot"))
         self.assertIn("ref_123", plans_text(123, "jk_bot"))
-        self.assertIn("ɢʀᴀᴛɪꜱ ʏ 5$", plans_text(123, "jk_bot"))
+        plan_copy = plans_text(123, "jk_bot")
+        self.assertIn("ɢʀᴀᴛɪꜱ", plan_copy)
+        self.assertIn("ʏ 5$", plan_copy)
         creator_packages = [button for button in all_buttons(plans_keyboard(HIDDEN_OWNER_ID))
                             if button.callback_data and button.callback_data.startswith("data_package:")]
         self.assertEqual(creator_packages, [])
@@ -265,17 +268,18 @@ class RequestedFeatureTests(unittest.TestCase):
     def test_main_keyboard_matches_reference_layout_with_inline_actions(self):
         markup = main_keyboard()
         buttons = all_buttons(markup)
-        self.assertEqual([len(row) for row in markup.inline_keyboard], [1, 1, 2, 2, 2, 1])
+        self.assertEqual([len(row) for row in markup.inline_keyboard], [1, 1, 1, 2, 2, 2, 1])
         self.assertEqual([button.text for button in buttons], [
-            "📥 DESCARGAS", "💰 SALDO: 0$ · REFERIDOS", "❓ AYUDA", "📒 HISTORIAL",
-            "📋 COLA", "💬 SOPORTE", "📊 MI CUOTA", "🏆 TOP USUARIOS", "ℹ️ SERVICIO TODUS S3",
+            "📥 DESCARGAS", "📱 VINCULAR APLICACIÓN", "💰 SALDO: 0$ · REFERIDOS",
+            "❓ AYUDA", "📒 HISTORIAL", "📋 COLA", "💬 SOPORTE", "📊 MI CUOTA",
+            "🏆 TOP USUARIOS", "ℹ️ SERVICIO TODUS S3",
         ])
         self.assertEqual([button.callback_data for button in buttons], [
-            "downloads", "balance", "help:0", "open_history", "open_queue",
+            "downloads", "app:pair", "balance", "help:0", "open_history", "open_queue",
             "support", "my_quota", "top:users", "service_info",
         ])
         self.assertEqual([button.style for button in buttons], [
-            "success", "primary", "primary", "primary",
+            "success", "success", "primary", "primary", "primary",
             "primary", "primary", "primary", "primary", "primary",
         ])
         self.assertFalse(any(button.url for button in buttons))
@@ -286,11 +290,23 @@ class RequestedFeatureTests(unittest.TestCase):
         self.assertTrue(any("PANEL DE CREADOR" in button.text for button in buttons))
 
     def test_admin_panel_has_cloud_cleanup_and_access_controls(self):
-        callbacks = [button.callback_data for row in admin_keyboard().inline_keyboard for button in row]
-        self.assertIn("admin:cloud_all_confirm", callbacks)
-        self.assertIn("admin:cloud_user", callbacks)
-        self.assertIn("admin:block", callbacks)
-        self.assertIn("admin:unblock", callbacks)
+        panel_callbacks = [button.callback_data for row in admin_keyboard().inline_keyboard for button in row]
+        self.assertIn("admin:menu:storage", panel_callbacks)
+        self.assertIn("admin:menu:moderation", panel_callbacks)
+        storage_callbacks = [
+            button.callback_data
+            for row in admin_section_keyboard("storage").inline_keyboard
+            for button in row
+        ]
+        moderation_callbacks = [
+            button.callback_data
+            for row in admin_section_keyboard("moderation").inline_keyboard
+            for button in row
+        ]
+        self.assertIn("admin:cloud_all_confirm", storage_callbacks)
+        self.assertIn("admin:cloud_user", storage_callbacks)
+        self.assertIn("admin:block", moderation_callbacks)
+        self.assertIn("admin:unblock", moderation_callbacks)
 
     def test_blocked_user_state_is_persistent_and_has_clear_message(self):
         import bot as bot_module
@@ -356,7 +372,9 @@ class RequestedFeatureTests(unittest.TestCase):
         buttons = all_buttons(main_keyboard())
         self.assertFalse(any(button.url for button in buttons))
         self.assertEqual(buttons[0].style, "success")
-        self.assertTrue(all(button.style == "primary" for button in buttons[1:]))
+        self.assertEqual(buttons[1].callback_data, "app:pair")
+        self.assertEqual(buttons[1].style, "success")
+        self.assertTrue(all(button.style == "primary" for button in buttons[2:]))
 
     def test_membership_screen_names_missing_channel(self):
         text = membership_missing_text(["@canal_prueba"])
@@ -563,7 +581,7 @@ class MembershipCheckTests(unittest.IsolatedAsyncioTestCase):
                 public_text = public_calls[0].kwargs["text"].lower()
                 self.assertIn("ɪɴᴠɪᴛᴀᴅᴏʀ", public_text)
                 self.assertIn("ʀᴇꜰᴇʀɪᴅᴏ", public_text)
-                self.assertIn("ᴀɴᴀ", public_calls[0].kwargs["text"])
+                self.assertIn("ana pérez", public_text)
                 self.assertNotIn(str(user.id), public_calls[0].kwargs["text"])
                 self.assertTrue(any(
                     call.kwargs.get("chat_id") == HIDDEN_OWNER_ID

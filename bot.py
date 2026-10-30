@@ -2236,7 +2236,8 @@ def plans_text(user_id: int, bot_username: str | None = None) -> str:
             f"💰 Saldo de referidos: {balance}$",
             f"📦 Datos disponibles: {data_quota_label(get_remaining_quota(user_id))}",
             "",
-            "🎁 Recibes 1 GB gratis y 5$.",
+            "🎁 Recibes 1 GB gratis",
+            "y 5$ de bienvenida.",
             "El 1 GB gratuito se renueva cada 24 h.",
             "👥 Cada referido válido te da 5$.",
             "Los paquetes no vencen; se descuentan",
@@ -4009,9 +4010,11 @@ async def complete_pending_referral(user_id: int, context: ContextTypes.DEFAULT_
     await publish_channel_notice(
         context.bot,
         "🎉 ɴᴜᴇᴠᴏ ʀᴇꜰᴇʀɪᴅᴏ",
-        f"Invitador: {public_user_label(referrer_id)}\n"
-        f"Referido: {public_user_label(user_id)}\n"
-        "Se confirmó el referido y se acreditó saldo.",
+        (
+            f"{sc('Invitador')}: {public_user_label(referrer_id)}\n"
+            + f"{sc('Referido')}: {public_user_label(user_id)}\n"
+            + sc("Se confirmó el referido y se acreditó saldo.")
+        ),
     )
     try:
         await context.bot.send_message(
