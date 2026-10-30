@@ -941,6 +941,9 @@ def broadcast_confirmation_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+GLOBAL_BROADCAST_CHANNEL = "@Dark_Zone_666"
+
+
 def broadcast_preview_text(state: dict) -> str:
     body = str(state.get("body", ""))
     preview_body = body if len(body) <= 1800 else body[:1800] + "…\n[Vista previa recortada]"
@@ -961,6 +964,7 @@ def broadcast_preview_text(state: dict) -> str:
         "",
         f"Adjunto: {attachment}",
         f"Botón: {button}",
+        f"Destino adicional: {GLOBAL_BROADCAST_CHANNEL} (el bot necesita permiso para publicar)",
         "",
         "Pulsa Enviar a todos para confirmar.",
     ])
@@ -978,6 +982,37 @@ def valid_broadcast_button_url(value: str) -> bool:
         return False
 
 
+async def _send_broadcast_to_chat(bot_obj, chat_id, message_text, keyboard, media_type, media_file_id, caption_fits):
+    if media_file_id and media_type == "photo" and caption_fits:
+        await bot_obj.send_photo(
+            chat_id=chat_id,
+            photo=media_file_id,
+            caption=message_text,
+            parse_mode=None,
+            reply_markup=keyboard,
+        )
+    elif media_file_id and media_type == "document" and caption_fits:
+        await bot_obj.send_document(
+            chat_id=chat_id,
+            document=media_file_id,
+            caption=message_text,
+            parse_mode=None,
+            reply_markup=keyboard,
+        )
+    else:
+        await bot_obj.send_message(
+            chat_id=chat_id,
+            text=message_text,
+            parse_mode=None,
+            reply_markup=keyboard,
+            disable_web_page_preview=True,
+        )
+        if media_file_id and media_type == "photo":
+            await bot_obj.send_photo(chat_id=chat_id, photo=media_file_id)
+        elif media_file_id and media_type == "document":
+            await bot_obj.send_document(chat_id=chat_id, document=media_file_id)
+
+
 async def broadcast_admin_message(
     bot_obj,
     body: str,
@@ -986,10 +1021,11 @@ async def broadcast_admin_message(
     media_file_id: str | None = None,
     button_label: str | None = None,
     button_url: str | None = None,
-) -> tuple[int, int, int]:
-    """Envía texto y, opcionalmente, un adjunto y un botón a usuarios conocidos."""
+) -> tuple[int, int, int, bool]:
+    """Envía la difusión a los usuarios conocidos y al canal configurado."""
     targets = registered_user_ids()
     sent = failed = 0
+    channel_sent = False
     keyboard = None
     if button_label and button_url:
         keyboard = InlineKeyboardMarkup([[btn(button_label, url=button_url)]])
@@ -997,41 +1033,23 @@ async def broadcast_admin_message(
     caption_fits = len(message_text.encode("utf-16-le")) // 2 <= 900
     for target_id in targets:
         try:
-            if media_file_id and media_type == "photo" and caption_fits:
-                await bot_obj.send_photo(
-                    chat_id=target_id,
-                    photo=media_file_id,
-                    caption=message_text,
-                    parse_mode=None,
-                    reply_markup=keyboard,
-                )
-            elif media_file_id and media_type == "document" and caption_fits:
-                await bot_obj.send_document(
-                    chat_id=target_id,
-                    document=media_file_id,
-                    caption=message_text,
-                    parse_mode=None,
-                    reply_markup=keyboard,
-                )
-            else:
-                await bot_obj.send_message(
-                    chat_id=target_id,
-                    text=message_text,
-                    parse_mode=None,
-                    reply_markup=keyboard,
-                    disable_web_page_preview=True,
-                )
-                if media_file_id and media_type == "photo":
-                    await bot_obj.send_photo(chat_id=target_id, photo=media_file_id)
-                elif media_file_id and media_type == "document":
-                    await bot_obj.send_document(chat_id=target_id, document=media_file_id)
+            await _send_broadcast_to_chat(
+                bot_obj, target_id, message_text, keyboard, media_type, media_file_id, caption_fits
+            )
             sent += 1
         except Exception as exc:
             failed += 1
-            log.warning("Falló la difusión a %s (%s)", target_id, type(exc).__name__)
+            log.warning("Falló la difusión a usuario %s (%s)", target_id, type(exc).__name__)
         # Evita disparar demasiadas solicitudes consecutivas contra Telegram.
         await asyncio.sleep(0.10 if media_file_id else 0.05)
-    return len(targets), sent, failed
+    try:
+        await _send_broadcast_to_chat(
+            bot_obj, GLOBAL_BROADCAST_CHANNEL, message_text, keyboard, media_type, media_file_id, caption_fits
+        )
+        channel_sent = True
+    except Exception as exc:
+        log.warning("Falló la difusión al canal configurado (%s)", type(exc).__name__)
+    return len(targets), sent, failed, channel_sent
 
 
 def get_plan_info(plan_key: str) -> dict:
@@ -1487,22 +1505,44 @@ def admin_user_history_keyboard(user_id: int, entries: list[dict] | None = None)
     return InlineKeyboardMarkup(rows)
 
 
-def admin_registered_users_text(page: int = 0, page_size: int = 10) -> str:
+ADMIN_USERS_PAGE_SIZE = 3
+
+
+def admin_registered_users_text(page: int = 0, page_size: int = ADMIN_USERS_PAGE_SIZE) -> str:
     users_data = _load_json(USERS_DATA_FILE).get("users", {})
     users = users_data if isinstance(users_data, dict) else {}
     user_ids = registered_user_ids()
+    page_size = max(1, int(page_size))
     start = max(0, page) * page_size
     selected = user_ids[start:start + page_size]
     history = all_task_history()
     lines = [f"Página {page + 1} · {len(user_ids)} usuarios registrados", ""]
+
+    def safe_display(value: object, limit: int) -> str:
+        cleaned = re.sub(r"[\x00-\x1f\x7f]", " ", str(value or ""))
+        cleaned = (cleaned.replace("&", "＆").replace("<", "‹").replace(">", "›")
+                   .replace("{", "｛").replace("}", "｝"))
+        normalized = " ".join(cleaned.split())
+        clipped = []
+        units = 0
+        for character in normalized:
+            char_units = 2 if ord(character) > 0xFFFF else 1
+            if units + char_units > limit:
+                break
+            clipped.append(character)
+            units += char_units
+        return "".join(clipped)
+
     if not selected:
         lines.append("No hay usuarios en esta página.")
     for number, user_id in enumerate(selected, start + 1):
         entry = users.get(str(user_id), {})
         if not isinstance(entry, dict):
             entry = {}
-        full_name = str(entry.get("full_name") or entry.get("first_name") or "Sin nombre").strip()
-        username = str(entry.get("username") or "sin @usuario")
+        full_name = safe_display(entry.get("full_name") or entry.get("first_name") or "Sin nombre", 48)
+        username = safe_display(entry.get("username") or "sin @usuario", 32) or "sin @usuario"
+        if not full_name:
+            full_name = "Sin nombre"
         username = username if str(username).startswith("@") else f"@{username}"
         records = history.get(str(user_id), [])
         records = [record for record in records if isinstance(record, dict)] if isinstance(records, list) else []
@@ -1516,8 +1556,9 @@ def admin_registered_users_text(page: int = 0, page_size: int = 10) -> str:
     return card("👥 ᴜꜱᴜᴀʀɪᴏꜱ ʀᴇɢɪꜱᴛʀᴀᴅᴏꜱ", lines) + f"\n\n{BOT_FOOTER}"
 
 
-def admin_registered_users_keyboard(page: int = 0, page_size: int = 10) -> InlineKeyboardMarkup:
+def admin_registered_users_keyboard(page: int = 0, page_size: int = ADMIN_USERS_PAGE_SIZE) -> InlineKeyboardMarkup:
     user_ids = registered_user_ids()
+    page_size = max(1, int(page_size))
     start = max(0, page) * page_size
     selected = user_ids[start:start + page_size]
     rows = []
@@ -4276,7 +4317,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 return
             context.user_data.pop("admin_state", None)
             await query.answer(sc("Difusión iniciada"))
-            total, sent, failed = await broadcast_admin_message(
+            total, sent, failed, channel_sent = await broadcast_admin_message(
                 context.bot,
                 body,
                 media_type=state.get("media_type"),
@@ -4287,9 +4328,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await edit_query_message_text(
                 query.message,
                 card("📢 ᴅɪꜰᴜꜱɪóɴ ᴛᴇʀᴍɪɴᴀᴅᴀ", [
-                    f"Registrados: {total}",
-                    f"Entregados: {sent}",
-                    f"No entregados: {failed}",
+                    f"Usuarios registrados: {total}",
+                    f"Entregados a usuarios: {sent}",
+                    f"No entregados a usuarios: {failed}",
+                    f"Canal {GLOBAL_BROADCAST_CHANNEL}: {'publicado' if channel_sent else 'no publicado; revisa permisos del bot'}",
                 ]),
                 reply_markup=InlineKeyboardMarkup([[btn("Volver al panel", callback_data="admin:back")]]),
             )
@@ -5703,12 +5745,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             if not body:
                 await message.reply_text(sc("El mensaje no puede estar vacío."))
                 return
-            total, sent, failed = await broadcast_admin_message(context.bot, body)
+            total, sent, failed, channel_sent = await broadcast_admin_message(context.bot, body)
             await message.reply_text(
                 card("📢 ᴅɪꜰᴜꜱɪóɴ ᴛᴇʀᴍɪɴᴀᴅᴀ", [
-                    f"Registrados: {total}",
-                    f"Entregados: {sent}",
-                    f"No entregados: {failed}",
+                    f"Usuarios registrados: {total}",
+                    f"Entregados a usuarios: {sent}",
+                    f"No entregados a usuarios: {failed}",
+                    f"Canal {GLOBAL_BROADCAST_CHANNEL}: {'publicado' if channel_sent else 'no publicado; revisa permisos del bot'}",
                 ]),
                 reply_markup=InlineKeyboardMarkup([[btn("⬅️ ᴘᴀɴᴇʟ ᴀᴅᴍɪɴ", callback_data="admin:back")]]),
             )
