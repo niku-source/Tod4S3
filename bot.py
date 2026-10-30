@@ -4606,9 +4606,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             try:
                 page = max(0, int(query.data.split(":")[-1]))
             except (TypeError, ValueError):
-                await query.answer(sc("Página inválida"), show_alert=True)
+                await edit_query_message_text(
+                    query.message,
+                    card("⚠️ ᴘáɢɪɴᴀ ɪɴᴠáʟɪᴅᴀ", ["No se pudo abrir esa página de usuarios."]),
+                    reply_markup=admin_registered_users_keyboard(0),
+                )
                 return
-            await query.answer()
             await edit_query_message_text(query.message,
                 admin_registered_users_text(page),
                 reply_markup=admin_registered_users_keyboard(page),
