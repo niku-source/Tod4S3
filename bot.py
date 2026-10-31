@@ -45,7 +45,7 @@ from telegram.ext import (
 )
 from telethon import TelegramClient, events
 from platform_downloads import download_platform_video, is_play_store_page, is_supported_platform_url
-from todus_s3_storage import delete_from_todus_s3, upload_to_todus_s3
+from todus_s3_storage import TODUS_S3_BASE_URL, delete_from_todus_s3, upload_to_todus_s3
 from telegram_backup import (
     BackupLayout,
     backup_to_telegram,
@@ -118,7 +118,8 @@ except ValueError:
 #   "cloud" = subir a ToDus S3 y dar enlaces (comportamiento original)
 #   "chat"  = enviar el archivo directamente al chat privado del usuario
 DELIVERY_MODE = os.getenv("DELIVERY_MODE", "chat").strip().lower() or "chat"
-DELIVERY_MODE = os.getenv("DELIVERY_MODE", "chat").strip().lower() or "chat"
+S3_UPLOAD_PREFIX = os.getenv("TODUS_S3_UPLOAD_PREFIX", "users/df").strip("/") or "users/df"
+S3_UPLOAD_URL = f"{TODUS_S3_BASE_URL.rstrip('/')}/{S3_UPLOAD_PREFIX}/"
 # Límite de Bot API para enviar documentos: 50 MiB.
 BOT_API_SEND_LIMIT = 50 * MIB
 
@@ -1402,7 +1403,7 @@ async def todus_message_cleanup_monitor(application: Application) -> None:
     while True:
         try:
             await asyncio.sleep(60 * 60)
-            if DELIVERY_MODE != "todus":
+            if not (TODUS_BOT_PHONE and TODUS_BOT_PASSWORD):
                 continue
             total, deleted, failed = await asyncio.to_thread(cleanup_todus_sent_messages)
             if total:
@@ -2096,7 +2097,7 @@ def download_progress_text(received: int, total: int, speed: float = 0, eta: flo
 
 async def upload_to_todus_s3_with_progress(
     status, path: Path, download_name: str, telegram_user_id: int,
-    reply_markup=None, is_cancelled=None,
+    reply_markup=None, is_cancelled=None, object_prefix: str | None = None,
 ) -> tuple[str, int]:
     loop = asyncio.get_running_loop()
     state = {"last_time": 0.0, "last_bucket": -1, "last_sent": 0, "start_time": time.monotonic()}
@@ -2142,6 +2143,7 @@ async def upload_to_todus_s3_with_progress(
         on_progress=on_progress,
         timeout_seconds=env_int("MAX_TRANSFER_HOURS", 24) * 3600,
         is_cancelled=is_cancelled,
+        object_prefix=object_prefix,
     )
 
 
@@ -2301,62 +2303,99 @@ def data_package_confirmation_keyboard(package_key: str) -> InlineKeyboardMarkup
 
 def download_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [btn("📁 Telegram", callback_data="download:telegram"),
-         btn("🔗 Enlace", callback_data="download:url")],
+        [btn("☁️ Nube S3", callback_data="download:mode:s3", style="success"),
+         btn("📲 Modo ToDus", callback_data="download:mode:todus", style="primary")],
         [btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")],
     ])
 
 
 def download_menu_text() -> str:
     return card("📥 ᴄᴇɴᴛʀᴏ ᴅᴇ ᴅᴇꜱᴄᴀʀɢᴀꜱ", [
-        "Elige cómo enviar el archivo.",
+        "Elige dónde entregar tus archivos.",
         "",
-        "📁 Telegram: documento,",
-        "video, audio o foto.",
+        "☁️ Nube S3: se sube el",
+        "archivo y recibes el enlace.",
+        f"Destino: {{mono:{S3_UPLOAD_URL}}}",
         "",
-        "🔗 Enlace: pega el enlace",
-        "público del video o una",
-        "URL directa de archivo.",
-        "No necesitas descargarlo",
-        "antes ni iniciar sesión.",
+        "📲 Modo ToDus: conserva",
+        "la entrega normal a tu",
+        "número registrado.",
         "",
-        "Hasta 20 enlaces por",
-        "mensaje.",
+        "Después eliges enviar un",
+        "archivo de Telegram o un enlace.",
     ])
 
 
-def download_prompt_text(source: str) -> str:
-    todus_note = []
-    if DELIVERY_MODE == "todus":
-        todus_note = [
+def download_source_menu_text(delivery_mode: str) -> str:
+    if delivery_mode == "todus":
+        return card("📲 ᴍᴏᴅᴏ ᴛᴏᴅᴜꜱ", [
+            "Destino elegido: ToDus.",
+            "El archivo se enviará a",
+            "tu número registrado.",
             "",
-            "📲 El archivo se enviará a tu chat de ToDus.",
-            "Incluye videos de YouTube y otros enlaces.",
-            "Puedes registrar o cambiar tu número ToDus.",
+            "Ahora elige si vas a",
+            "enviar un archivo o enlace.",
+        ])
+    return card("☁️ ɴᴜʙᴇ ꜱ3", [
+        "Destino elegido: nube S3.",
+        "Los archivos se guardan en:",
+        f"{{mono:{S3_UPLOAD_URL}}}",
+        "",
+        "Ahora elige si vas a",
+        "enviar un archivo o enlace.",
+    ])
+
+
+def download_source_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("📁 Telegram", callback_data="download:telegram"),
+         btn("🔗 Enlace", callback_data="download:url")],
+        [btn("⬅️ Cambiar destino", callback_data="downloads"),
+         btn("🏠 ɪɴɪᴄɪᴏ", callback_data="home")],
+    ])
+
+
+def download_prompt_text(source: str, delivery_mode: str | None = None) -> str:
+    mode = delivery_mode or DELIVERY_MODE
+    delivery_note = []
+    if mode == "todus":
+        delivery_note = [
+            "",
+            "📲 Se enviará a tu chat de ToDus.",
+            "Debes tener registrado tu número.",
+        ]
+    elif mode in {"s3", "cloud"}:
+        delivery_note = [
+            "",
+            "☁️ Se subirá a la nube S3.",
+            "Después recibirás el enlace.",
         ]
     if source == "telegram":
         return card("📁 ᴍᴏᴅᴏ ᴛᴇʟᴇɢʀᴀᴍ", [
             "Envía o reenvía el",
             "archivo aquí para",
             "iniciar.",
-            *todus_note,
+            *delivery_note,
         ])
     return card("🔗 ᴍᴏᴅᴏ ᴇɴʟᴀᴄᴇ", [
         "Pega aquí el enlace",
         "público del video o la",
         "URL directa del archivo.",
         "No necesitas descargarlo",
-        "antes ni iniciar sesión.",
-        "",
-        "Hasta 20 enlaces en",
-        "un mensaje.",
-        *todus_note,
-    ])
+            "antes ni iniciar sesión.",
+            "",
+            "Hasta 20 enlaces en",
+            "un mensaje.",
+            *delivery_note,
+        ])
 
 
-def download_prompt_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
+def download_prompt_keyboard(
+    user_id: int | None = None,
+    delivery_mode: str | None = None,
+) -> InlineKeyboardMarkup:
     rows = []
-    if DELIVERY_MODE == "todus":
+    if (delivery_mode or DELIVERY_MODE) == "todus":
         label = "📱 ᴄᴀᴍʙɪᴀʀ ɴúᴍᴇʀᴏ ᴛᴏᴅᴜꜱ" if user_id and get_user_todus_number(user_id) else "📱 ʀᴇɢɪꜱᴛʀᴀʀ ɴúᴍᴇʀᴏ ᴛᴏᴅᴜꜱ"
         rows.append([btn(label, callback_data="todus:register")])
     rows.append([
@@ -3203,12 +3242,16 @@ async def enqueue_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE, *
     message, user = update.effective_message, update.effective_user
     if not message or not user:
         return
+    selected_mode = (getattr(context, "user_data", {}) or {}).get("download_delivery_mode")
+    if selected_mode not in {"s3", "todus"}:
+        selected_mode = None
     placeholder = await message.reply_text(
         card("⏳ ᴇɴ ᴄᴏʟᴀ", ["Esperando turno..."]),
     )
     job = TransferTask(
         user_id=user.id, chat_id=message.chat_id, source_kind=source_kind,
         source_message=message, status_message=placeholder, source_url=source_url,
+        delivery_mode=selected_mode,
         username=f"@{user.username}" if user.username else None,
         display_name=getattr(user, "full_name", None),
         compress_after_download=compress_after_download,
@@ -3230,6 +3273,7 @@ async def enqueue_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE, *
 
 
 async def process_task(job: TransferTask, application: Application) -> None:
+    delivery_mode = job.delivery_mode or DELIVERY_MODE
     if job.cancel_requested:
         job.set_state("paused")
         await _edit_task_status(job, task_detail_text(job))
@@ -3384,10 +3428,10 @@ async def process_task(job: TransferTask, application: Application) -> None:
         # El tamaño configurable se mantiene para el modo chat, pero ToDus
         # usa partes pequeñas para reducir fallos durante la descarga y unión.
         part_size = env_int("MAX_PART_SIZE_MIB", 1900) * MIB
-        if (DELIVERY_MODE == "chat" or force_chat_delivery) and not application.bot_data.get("local_bot_api", False):
+        if (delivery_mode == "chat" or force_chat_delivery) and not application.bot_data.get("local_bot_api", False):
             # Sin un servidor local de Bot API, el límite de documentos es 50 MiB.
             part_size = min(part_size, BOT_API_SEND_LIMIT - 2 * MIB)
-        if DELIVERY_MODE == "todus":
+        if delivery_mode == "todus":
             # 250 MiB por parte: no comprime el archivo, pero hace más estable
             # la descarga y la reconstrucción en teléfonos con conexión irregular.
             part_size = min(part_size, 250 * MIB)
@@ -3421,13 +3465,13 @@ async def process_task(job: TransferTask, application: Application) -> None:
                     ]))
                 except Exception:
                     log.debug("No se pudo mostrar el inicio de subida %s", job.task_id, exc_info=True)
-            if DELIVERY_MODE == "chat" or force_chat_delivery:
+            if delivery_mode == "chat" or force_chat_delivery:
                 await send_document_to_chat(
                     job, application.bot, part_path, part_name,
                     index, len(job.part_paths),
                 )
                 job.part_urls[index] = ""
-            elif DELIVERY_MODE == "todus":
+            elif delivery_mode == "todus":
                 target_number = get_user_todus_number(job.user_id)
                 if not target_number:
                     raise ValueError(
@@ -3452,6 +3496,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
                     job.status_message, part_path, part_name, job.user_id,
                     reply_markup=lambda: task_keyboard(job),
                     is_cancelled=lambda: job.cancel_requested,
+                    object_prefix=S3_UPLOAD_PREFIX if job.delivery_mode == "s3" else None,
                 )
                 job.part_urls[index] = link
             if job.cancel_requested:
@@ -3484,7 +3529,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
         except Exception as e:
             log.error(f"Error guardando historial: {e}")
 
-        if DELIVERY_MODE == "todus" and not force_chat_delivery:
+        if delivery_mode == "todus" and not force_chat_delivery:
             try:
                 record_delivery(
                     job.user_id,
@@ -3499,13 +3544,13 @@ async def process_task(job: TransferTask, application: Application) -> None:
         schedule_data_backup(application, "subida completada")
         job.set_state("done")
         links = sorted((i, u) for i, u in job.part_urls.items() if u)
-        if DELIVERY_MODE == "chat" or force_chat_delivery:
+        if delivery_mode == "chat" or force_chat_delivery:
             final_keyboard = None
         elif len(links) == 1:
             final_keyboard = result_keyboard(links[0][1], job.task_id)
         else:
             final_keyboard = result_multi_keyboard(job.task_id)
-        if DELIVERY_MODE == "chat" or force_chat_delivery:
+        if delivery_mode == "chat" or force_chat_delivery:
             await job.status_message.edit_text(card("✅ ᴀʀᴄʜɪᴠᴏ ʟɪꜱᴛᴏ", [
                 "Ya está en este chat ☝️",
                 "",
@@ -3517,7 +3562,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 "Si fueron varias partes, une con HJSplit",
                 "o el programa que prefieras.",
             ]))
-        elif DELIVERY_MODE == "todus":
+        elif delivery_mode == "todus":
             await job.status_message.edit_text(card("✅ ᴀʀᴄʜɪᴠᴏ ʟɪꜱᴛᴏ", [
                 "Ya está en tu ToDus 📲",
                 "",
@@ -4142,13 +4187,27 @@ def todus_registration_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[btn("🏠 ʜᴏᴍᴇ", callback_data="home")]])
 
 
-async def require_todus_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+async def require_todus_number(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    delivery_mode: str | None = None,
+) -> bool:
     """Bloquea una descarga hasta que el usuario indique su destino ToDus."""
-    if DELIVERY_MODE != "todus":
+    mode = delivery_mode or context.user_data.get("download_delivery_mode") or DELIVERY_MODE
+    if mode != "todus":
         return True
     user = update.effective_user
     message = update.effective_message
-    if not user or not message or get_user_todus_number(user.id):
+    if not user or not message:
+        return True
+    if not TODUS_BOT_PHONE or not TODUS_BOT_PASSWORD:
+        await message.reply_text(card("⚠️ ᴛᴏᴅᴜꜱ ɴᴏ ᴇꜱᴛá ᴅɪꜱᴘᴏɴɪʙʟᴇ", [
+            "El modo ToDus no está configurado",
+            "en este momento. Elige nube S3",
+            "o contacta al administrador.",
+        ]), reply_markup=download_menu_keyboard())
+        return False
+    if get_user_todus_number(user.id):
         return True
     await message.reply_text(
         card("📱 ʀᴇɢɪꜱᴛʀᴀ ᴛᴜ ᴛᴏᴅᴜꜱ", [
@@ -4712,7 +4771,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
 
         if query.data == "admin:todus_cleanup_yes":
-            if DELIVERY_MODE != "todus":
+            if not (TODUS_BOT_PHONE and TODUS_BOT_PASSWORD):
                 await edit_query_message_text(
                     query.message,
                     card("⚠️ ᴛᴏᴅᴜꜱ ɴᴏ ᴇꜱᴛá ᴀᴄᴛɪᴠᴏ", [
@@ -5145,15 +5204,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if query.data == "downloads":
+        context.user_data.pop("download_delivery_mode", None)
         await edit_query_message_text(query.message, download_menu_text(), reply_markup=download_menu_keyboard())
+        return
+
+    if query.data in {"download:mode:s3", "download:mode:todus"}:
+        delivery_mode = query.data.rsplit(":", 1)[-1]
+        context.user_data["download_delivery_mode"] = delivery_mode
+        await edit_query_message_text(
+            query.message,
+            download_source_menu_text(delivery_mode),
+            reply_markup=download_source_keyboard(),
+        )
         return
 
     if query.data in {"download:telegram", "download:url"}:
         source = query.data.split(":", 1)[1]
+        delivery_mode = context.user_data.get("download_delivery_mode") or DELIVERY_MODE
         await edit_query_message_text(
             query.message,
-            download_prompt_text(source),
-            reply_markup=download_prompt_keyboard(user.id),
+            download_prompt_text(source, delivery_mode),
+            reply_markup=download_prompt_keyboard(user.id, delivery_mode),
         )
         return
 
@@ -5502,6 +5573,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif query.data == "home":
         context.user_data.pop("admin_state", None)
         context.user_data.pop("awaiting_support", None)
+        context.user_data.pop("download_delivery_mode", None)
         await edit_welcome_message(
             query.message,
             user.id,
@@ -5944,8 +6016,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     except ValueError as exc:
         await message.reply_text(sc(str(exc)))
         return
-    if DELIVERY_MODE == "todus" and not context.user_data.get("premium_compress_mode") and not get_user_todus_number(user.id):
-        await require_todus_number(update, context)
+    delivery_mode = context.user_data.get("download_delivery_mode") or DELIVERY_MODE
+    if not context.user_data.get("premium_compress_mode") and not await require_todus_number(
+        update, context, delivery_mode,
+    ):
         return
     compress_mode = bool(context.user_data.pop("premium_compress_mode", False))
     if compress_mode and not (is_owner(user.id) or get_user_plan(user.id) == "premium"):
@@ -5956,6 +6030,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             update, context, source_kind="url", source_url=source_url,
             compress_after_download=compress_mode,
         )
+    if source_urls:
+        context.user_data.pop("download_delivery_mode", None)
 
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -6022,8 +6098,10 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if allowed and user.id not in allowed and not is_owner(user.id):
         await message.reply_text(sc("Bot limitado a usuarios autorizados."))
         return
-    if DELIVERY_MODE == "todus" and not context.user_data.get("premium_compress_mode") and not get_user_todus_number(user.id):
-        await require_todus_number(update, context)
+    delivery_mode = context.user_data.get("download_delivery_mode") or DELIVERY_MODE
+    if not context.user_data.get("premium_compress_mode") and not await require_todus_number(
+        update, context, delivery_mode,
+    ):
         return
     size_hint = None
     for media_name in ("document", "video", "animation", "audio", "voice", "video_note"):
@@ -6051,6 +6129,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         update, context, source_kind="media",
         compress_after_download=compress_mode,
     )
+    context.user_data.pop("download_delivery_mode", None)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -6147,7 +6226,7 @@ async def post_init(application: Application) -> None:
     application.bot_data["bot_username"] = identity.username or os.getenv("BOT_USERNAME", "jk_down_bot")
     await asyncio.to_thread(expire_cloud_files)
     application.bot_data["cloud_expiration_task"] = asyncio.create_task(cloud_expiration_monitor(application))
-    if DELIVERY_MODE == "todus":
+    if TODUS_BOT_PHONE and TODUS_BOT_PASSWORD:
         application.bot_data["todus_message_cleanup_task"] = asyncio.create_task(
             todus_message_cleanup_monitor(application)
         )

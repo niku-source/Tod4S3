@@ -32,6 +32,7 @@ class TransferTask:
     compress_after_download: bool = False
     error: str | None = None
     cancel_requested: bool = False
+    delivery_mode: str | None = None
 
     def set_state(self, state: str) -> None:
         self.state = state

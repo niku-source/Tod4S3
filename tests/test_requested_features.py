@@ -20,7 +20,10 @@ from bot import (
     download_keyboard,
     download_menu_keyboard,
     download_menu_text,
+    download_prompt_keyboard,
     download_prompt_text,
+    download_source_keyboard,
+    download_source_menu_text,
     link_txt_filename,
     main_keyboard,
     apply_referral,
@@ -182,13 +185,27 @@ class RequestedFeatureTests(unittest.TestCase):
         self.assertEqual([len(row) for row in markup.inline_keyboard], [2, 1])
         self.assertEqual(
             [button.callback_data for button in markup.inline_keyboard[0]],
-            ["download:telegram", "download:url"],
+            ["download:mode:s3", "download:mode:todus"],
         )
+        source_callbacks = [
+            button.callback_data
+            for row in download_source_keyboard().inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(source_callbacks[:2], ["download:telegram", "download:url"])
+        self.assertIn("todus:register", [
+            button.callback_data
+            for row in download_prompt_keyboard(delivery_mode="todus").inline_keyboard
+            for button in row
+        ])
 
     def test_download_prompts_accept_public_video_links_without_manual_download(self):
         menu_text = download_menu_text().lower()
-        prompt_text = download_prompt_text("url").lower()
-        for text in (menu_text, prompt_text):
+        source_text = download_source_menu_text("s3").lower()
+        prompt_text = download_prompt_text("url", "s3").lower()
+        self.assertIn("users/df", source_text)
+        self.assertIn("ɴᴜʙᴇ ꜱ3", menu_text)
+        for text in (prompt_text,):
             self.assertIn("ᴘᴜ́ʙʟɪᴄᴏ", text)
             self.assertIn("ᴠɪᴅᴇᴏ", text)
             self.assertIn("ᴜʀʟ ᴅɪʀᴇᴄᴛᴀ", text)

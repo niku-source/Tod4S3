@@ -16,6 +16,8 @@ from bot import (
     download_keyboard,
     download_menu_keyboard,
     download_menu_text,
+    download_source_keyboard,
+    download_source_menu_text,
     download_progress_text,
     download_telegram_media,
     extract_http_urls,
@@ -117,15 +119,23 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(buttons[1].style, "success")
         self.assertTrue(all(button.style == "primary" for button in buttons[2:]))
 
-    def test_download_menu_offers_telegram_and_direct_url_routes(self):
+    def test_download_menu_offers_s3_or_todus_then_telegram_or_url_sources(self):
         buttons = [button for row in download_menu_keyboard().inline_keyboard for button in row]
         callbacks = [button.callback_data for button in buttons]
-        self.assertEqual(callbacks[:2], ["download:telegram", "download:url"])
+        self.assertEqual(callbacks[:2], ["download:mode:s3", "download:mode:todus"])
+        source_buttons = [
+            button for row in download_source_keyboard().inline_keyboard for button in row
+        ]
+        self.assertEqual(
+            [button.callback_data for button in source_buttons[:2]],
+            ["download:telegram", "download:url"],
+        )
         self.assertIn(sc("🏠 inicio"), [button.text for button in buttons])
         text = download_menu_text()
         self.assertIn("ᴄᴇɴᴛʀᴏ ᴅᴇ ᴅᴇꜱᴄᴀʀɢᴀꜱ", text)
-        self.assertIn("📁", text)
-        self.assertIn("🔗", text)
+        self.assertIn("users/df", download_source_menu_text("s3"))
+        self.assertTrue(any("📁" in button.text for button in source_buttons))
+        self.assertTrue(any("🔗" in button.text for button in source_buttons))
 
     async def test_startup_without_mtproto_credentials_keeps_bot_available(self):
         application = SimpleNamespace(

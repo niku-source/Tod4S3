@@ -90,6 +90,7 @@ def build_object_key(
     telegram_user_id: int,
     now: datetime | None = None,
     filename: str | None = None,
+    object_prefix: str | None = None,
 ) -> str:
     if isinstance(telegram_user_id, bool) or int(telegram_user_id) <= 0:
         raise ValueError("El ID de Telegram debe ser un entero positivo.")
@@ -103,10 +104,17 @@ def build_object_key(
     if not re.fullmatch(r"\.[a-z0-9]{1,16}", extension):
         extension = ".bin"
         safe_name = f"{Path(safe_name).stem or 'download'}{extension}"
-    return (
-        f"users/tg_{int(telegram_user_id)}/telegram/"
-        f"{stamp}-{folder_id}/telegram_{file_id}_{safe_name}"
-    )
+    if object_prefix is None:
+        prefix = f"users/tg_{int(telegram_user_id)}/telegram"
+    else:
+        prefix_parts = str(object_prefix).strip("/").split("/")
+        if not prefix_parts or any(
+            part in {"", ".", ".."} or not re.fullmatch(r"[A-Za-z0-9._-]+", part)
+            for part in prefix_parts
+        ):
+            raise ValueError("El prefijo de almacenamiento no es válido.")
+        prefix = "/".join(prefix_parts)
+    return f"{prefix}/{stamp}-{folder_id}/telegram_{file_id}_{safe_name}"
 
 
 def _content_disposition(filename: str) -> str:
@@ -182,17 +190,19 @@ def upload_to_todus_s3(
     timeout_seconds: int = 24 * 60 * 60,
     is_cancelled=None,
     base_url: str = TODUS_S3_BASE_URL,
+    object_prefix: str | None = None,
 ) -> tuple[str, int]:
     """Upload a file with an unauthenticated PUT to ToDus S3 and return its public URL.
 
-    The Telegram user ID is used only as a namespace in the object key. No ToDus
-    account, phone number, password or Authorization header is required.
+    By default, the Telegram user ID forms part of the object namespace; callers
+    may provide a validated object_prefix to use a configured destination folder.
+    No ToDus account, phone number, password or Authorization header is required.
     """
     path = Path(local_path)
     if not path.is_file():
         raise FileNotFoundError(f"Archivo no encontrado: {path}")
     size = path.stat().st_size
-    key = build_object_key(telegram_user_id, filename=filename)
+    key = build_object_key(telegram_user_id, filename=filename, object_prefix=object_prefix)
     url = f"{base_url.rstrip('/')}/{quote(key, safe='/')}"
     content_type = mimetypes.guess_type(Path(filename).name)[0] or "application/octet-stream"
     headers = {
