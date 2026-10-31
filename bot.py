@@ -120,6 +120,7 @@ except ValueError:
 DELIVERY_MODE = os.getenv("DELIVERY_MODE", "chat").strip().lower() or "chat"
 S3_UPLOAD_PREFIX = os.getenv("TODUS_S3_UPLOAD_PREFIX", "users/df").strip("/") or "users/df"
 S3_UPLOAD_URL = f"{TODUS_S3_BASE_URL.rstrip('/')}/{S3_UPLOAD_PREFIX}/"
+S3_UPLOAD_TTL_HOURS = 12
 # Límite de Bot API para enviar documentos: 50 MiB.
 BOT_API_SEND_LIMIT = 50 * MIB
 
@@ -1384,8 +1385,6 @@ async def delete_history_entry_cloud(entry: dict) -> bool:
 async def cloud_expiration_monitor(application: Application) -> None:
     """Revisa periódicamente los TTL para que el borrado ocurra aunque nadie pulse botones."""
     while True:
-        if LINK_EXPIRY_HOURS <= 0:
-            return
         try:
             removed = await asyncio.to_thread(expire_cloud_files)
             if removed:
@@ -2460,12 +2459,25 @@ def history_detail_keyboard(entry: dict, index: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def storage_expiry(user_id: int, completed_at: datetime | None = None) -> datetime | None:
-    """Caducidad universal de los enlaces de nube; None = nunca expiran."""
-    if LINK_EXPIRY_HOURS <= 0:
+def storage_expiry(
+    user_id: int,
+    completed_at: datetime | None = None,
+    *,
+    hours: int | None = None,
+) -> datetime | None:
+    """Calcula el TTL de nube; hours permite una retención específica por destino."""
+    ttl_hours = LINK_EXPIRY_HOURS if hours is None else max(0, int(hours))
+    if ttl_hours <= 0:
         return None
     base = completed_at or datetime.now(timezone.utc)
-    return base + timedelta(hours=LINK_EXPIRY_HOURS)
+    return base + timedelta(hours=ttl_hours)
+
+
+def storage_duration_hours_for_task(job: TransferTask) -> int:
+    """Duración que se registra para la nube S3 elegida o para el plan vigente."""
+    if job.delivery_mode == "s3" and not job.compress_after_download:
+        return S3_UPLOAD_TTL_HOURS
+    return int(get_plan_info(get_user_plan(job.user_id)).get("storage_hours", 12))
 
 
 def expiry_label(expires_at: str | None) -> str:
@@ -3509,9 +3521,15 @@ async def process_task(job: TransferTask, application: Application) -> None:
         except Exception as e:
             log.error(f"Error no crítico al actualizar cuota: {e}")
 
-        # 💾 Guardar en historial persistente con TTL real de nube según el plan.
+        # 💾 Guardar en historial persistente con TTL según el destino o el plan.
         completed_at = datetime.now(timezone.utc)
-        stored_expiry = storage_expiry(job.user_id, completed_at)
+        storage_hours = storage_duration_hours_for_task(job)
+        s3_ttl_override = (
+            storage_hours
+            if job.delivery_mode == "s3" and not force_chat_delivery
+            else None
+        )
+        stored_expiry = storage_expiry(job.user_id, completed_at, hours=s3_ttl_override)
         expires_at = stored_expiry.isoformat() if stored_expiry else None
         try:
             save_task_history(job.user_id, {
@@ -3522,7 +3540,7 @@ async def process_task(job: TransferTask, application: Application) -> None:
                 "urls": [job.part_urls[i] for i in sorted(job.part_urls.keys()) if job.part_urls[i]],
                 "completed_at": completed_at.isoformat(),
                 "expires_at": expires_at,
-                "storage_duration_hours": get_plan_info(get_user_plan(job.user_id)).get("storage_hours", 12),
+                "storage_duration_hours": storage_hours,
                 "duration": max(0, job.updated_at - job.created_at),
                 "state": "done",
             })
