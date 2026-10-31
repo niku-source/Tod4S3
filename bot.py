@@ -120,7 +120,7 @@ except ValueError:
 DELIVERY_MODE = os.getenv("DELIVERY_MODE", "chat").strip().lower() or "chat"
 S3_UPLOAD_PREFIX = os.getenv("TODUS_S3_UPLOAD_PREFIX", "users/df").strip("/") or "users/df"
 S3_UPLOAD_URL = f"{TODUS_S3_BASE_URL.rstrip('/')}/{S3_UPLOAD_PREFIX}/"
-S3_UPLOAD_TTL_HOURS = 12
+S3_UPLOAD_TTL_HOURS = 12  # Retención en users/df antes de la eliminación automática.
 # Límite de Bot API para enviar documentos: 50 MiB.
 BOT_API_SEND_LIMIT = 50 * MIB
 
